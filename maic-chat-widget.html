@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MAIC Chatbot Widget</title>
   <style>
-    /* ===== MAIC Chat Widget Styles ===== */
+    /* ===== MAIC Chat Widget Styles — JMU Colors ===== */
     #maic-chat-btn {
       position: fixed; bottom: 24px; right: 24px; z-index: 9999;
       width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer;
@@ -143,47 +143,97 @@
   <div id="maic-messages">
     <div class="maic-msg bot">
       <div class="avatar-sm">M</div>
-      <div class="bubble">Hi! 👋 I'm the MAIC Assistant. I can help you learn about AI, answer questions about our club, events, and membership.\n\nSign in as a member for full access, or ask me anything about AI or MAIC!</div>
+      <div class="bubble">Hi! 👋 I'm the MAIC Assistant. Ask me anything about the Madison AI Club — our programs, team, events, or how to get involved!</div>
     </div>
   </div>
 
   <div id="maic-input-row">
-    <textarea id="maic-input" placeholder="Ask me about AI or MAIC..." rows="1"></textarea>
+    <textarea id="maic-input" placeholder="Ask me about MAIC..." rows="1"></textarea>
     <button id="maic-send-btn" aria-label="Send">
       <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
     </button>
   </div>
-  <div id="maic-guest-note">Guests: 10 msgs/day · AI &amp; MAIC topics only</div>
+  <div id="maic-guest-note">MAIC topics only · Sign in for full access</div>
 </div>
 
 <script>
-  // ===== CONFIG — update these after deployment =====
+  // ===== CONFIG =====
   const MAIC_API_URL = 'https://c6epuyktfc.execute-api.us-east-1.amazonaws.com/prod/chat';
   const MAIC_USER_POOL_ID = 'us-east-1_2eenG9yf1';
   const MAIC_CLIENT_ID = '6tou1q5kq1pppqnrgk6e4ia33g';
   const MAIC_REGION = 'us-east-1';
-  // ==================================================
+
+  // ===== MAIC KNOWLEDGE BASE =====
+  const MAIC_CONTEXT = `
+You are the official assistant for MAIC — the Madison AI Club at James Madison University (JMU), established in 2025.
+
+ABOUT MAIC:
+MAIC brings together JMU students, industry professionals, and researchers to explore, build, and apply artificial intelligence — from weekly workshops to real-world projects. The club promotes ethical, responsible engagement with AI, connecting JMU students to industry professionals, applied research, and career opportunities.
+
+MISSION: Learn. Inspire. Teach. All Things AI.
+
+LOCATION: James Madison University, Harrisonburg, VA 22807
+
+CONTACT: madisonaiclub@gmail.com
+
+PROGRAMS:
+1. Technical Workshops — Hands-on weekly sessions led by the Education Chair covering the latest AI models, tools, frameworks, and research. Members only.
+2. Guest Speaker Series — Monthly sessions with industry professionals sharing insights on their careers and work in AI. Past speakers include leaders from Codecademy (Joe Holmes) and World/Orb (Yi Chen). Members only.
+3. Community Projects — Semester-long committee projects where members use AI to tackle real-world challenges and build practical technical experience. Members only.
+
+KEY BENEFITS:
+- Mentorship: Experienced members guide newcomers through AI projects and career development.
+- Industry Exposure: Monthly guest speakers from leading tech companies and AI organizations.
+- Impact: Semester-long projects using AI to address real challenges.
+
+EXECUTIVE BOARD (Co-Founders):
+- Mason Scofield — President & Co-Founder. Leads club strategy, partnerships, and long-term growth.
+- Alex Hollenbeck — Vice President & Co-Founder. Drives operations and supports execution of programs and events.
+- Jack Nelson — Secretary & Co-Founder. Keeps club communications, records, and coordination organized.
+- Emily LaVal — Treasurer & Co-Founder. Manages budgeting, funding, and financial planning.
+- Zachary Johnson — Education Chair & Co-Founder. Designs technical learning experiences and workshops.
+- Ayan Jan — Professional Relations & Co-Founder. Builds relationships with alumni and professionals for career opportunities.
+- Angeline Jackson — Social Media & Co-Founder. Leads digital presence, content strategy, and storytelling.
+
+NEWS & HIGHLIGHTS:
+- Featured in The Breeze (JMU's student newspaper): "What is the Madison Artificial Intelligence Club?"
+- Speaker Series: Joe Holmes from Codecademy joined MAIC, sharing insights about his career path and the evolving AI landscape.
+- Conference: Board members Ayan Jan, Mason Scofield, Errett Wallace, and John Nelson attended the NVTC 10th Annual Cyber Summit, gaining insights into AI, defense, and cybersecurity.
+
+LINKS:
+- JMU Website: jmu.edu
+- BeInvolved Page: beinvolved.jmu.edu
+- Breeze Article about MAIC
+- LinkedIn: Club has an active LinkedIn presence
+
+MEMBERSHIP:
+- Open to JMU students
+- Sign in via the Member Portal for full access to workshops, speakers, and projects
+- Affiliated with JMU Student Life
+
+Only answer questions related to MAIC, its programs, team, AI topics, and JMU. For anything unrelated, politely redirect the user to MAIC topics.
+`;
 
   let isAuthenticated = false;
   let memberToken = null;
   let isLoading = false;
 
-  const chatBtn    = document.getElementById('maic-chat-btn');
-  const chatWindow = document.getElementById('maic-chat-window');
-  const closeBtn   = document.getElementById('maic-close-btn');
+  const chatBtn     = document.getElementById('maic-chat-btn');
+  const chatWindow  = document.getElementById('maic-chat-window');
+  const closeBtn    = document.getElementById('maic-close-btn');
   const messagesDiv = document.getElementById('maic-messages');
-  const inputEl    = document.getElementById('maic-input');
-  const sendBtn    = document.getElementById('maic-send-btn');
-  const authBar    = document.getElementById('maic-auth-bar');
-  const authStatus = document.getElementById('maic-auth-status');
-  const loginBtn   = document.getElementById('maic-login-btn');
-  const logoutBtn  = document.getElementById('maic-logout-btn');
-  const loginForm  = document.getElementById('maic-login-form');
+  const inputEl     = document.getElementById('maic-input');
+  const sendBtn     = document.getElementById('maic-send-btn');
+  const authBar     = document.getElementById('maic-auth-bar');
+  const authStatus  = document.getElementById('maic-auth-status');
+  const loginBtn    = document.getElementById('maic-login-btn');
+  const logoutBtn   = document.getElementById('maic-logout-btn');
+  const loginForm   = document.getElementById('maic-login-form');
   const loginSubmit = document.getElementById('maic-login-submit');
-  const loginError = document.getElementById('maic-login-error');
-  const guestNote  = document.getElementById('maic-guest-note');
+  const loginError  = document.getElementById('maic-login-error');
+  const guestNote   = document.getElementById('maic-guest-note');
 
-  chatBtn.onclick = () => chatWindow.classList.toggle('open');
+  chatBtn.onclick  = () => chatWindow.classList.toggle('open');
   closeBtn.onclick = () => chatWindow.classList.remove('open');
 
   loginBtn.onclick = () => {
@@ -191,8 +241,7 @@
   };
 
   logoutBtn.onclick = () => {
-    isAuthenticated = false;
-    memberToken = null;
+    isAuthenticated = false; memberToken = null;
     authBar.classList.remove('member');
     authStatus.className = 'maic-auth-status';
     authStatus.textContent = '👤 Guest (limited access)';
@@ -203,7 +252,7 @@
   };
 
   loginSubmit.onclick = async () => {
-    const email = document.getElementById('maic-email').value.trim();
+    const email    = document.getElementById('maic-email').value.trim();
     const password = document.getElementById('maic-password').value;
     loginError.style.display = 'none';
     if (!email || !password) { showLoginError('Please enter email and password.'); return; }
@@ -237,9 +286,7 @@
       } else {
         showLoginError(data.message || 'Login failed. Check your credentials.');
       }
-    } catch(e) {
-      showLoginError('Connection error. Please try again.');
-    }
+    } catch(e) { showLoginError('Connection error. Please try again.'); }
     loginSubmit.textContent = 'Sign In as Member';
     loginSubmit.disabled = false;
   };
@@ -260,14 +307,14 @@
 
   // ===== MAIC TOPIC FILTER =====
   const MAIC_KEYWORDS = [
-    // Club & organization
     'maic', 'madison ai club', 'club', 'member', 'membership', 'join', 'officer',
     'president', 'vice president', 'treasurer', 'secretary', 'board', 'executive',
-    'jmu', 'james madison', 'university',
-    // Events & meetings
+    'jmu', 'james madison', 'university', 'harrisonburg',
+    'mason scofield', 'alex hollenbeck', 'jack nelson', 'emily laval',
+    'zachary johnson', 'ayan jan', 'angeline jackson', 'errett wallace',
     'event', 'meeting', 'workshop', 'hackathon', 'seminar', 'talk', 'speaker',
     'schedule', 'calendar', 'upcoming', 'next meeting', 'when', 'where',
-    // AI & machine learning topics
+    'codecademy', 'joe holmes', 'nvtc', 'cyber summit', 'breeze', 'newspaper',
     'ai', 'artificial intelligence', 'machine learning', 'ml', 'deep learning',
     'neural network', 'nlp', 'natural language', 'computer vision', 'data science',
     'llm', 'large language model', 'gpt', 'claude', 'chatgpt', 'openai', 'anthropic',
@@ -276,9 +323,9 @@
     'prompt', 'inference', 'fine-tun', 'reinforcement', 'supervised', 'unsupervised',
     'classification', 'regression', 'clustering', 'generative', 'diffusion',
     'bedrock', 'aws', 'amazon', 'cloud', 'api', 'lambda',
-    // General questions
     'what is', 'how does', 'explain', 'tell me about', 'what are', 'help',
-    'how to', 'learn', 'resource', 'project', 'research', 'career', 'internship'
+    'how to', 'learn', 'resource', 'project', 'research', 'career', 'internship',
+    'who', 'founder', 'contact', 'email', 'linkedin', 'program', 'mission'
   ];
 
   function isMAICRelated(msg) {
@@ -287,30 +334,105 @@
   }
   // =============================
 
+  // ===== LOCAL KNOWLEDGE BASE (fast answers without API) =====
+  function tryLocalAnswer(msg) {
+    const q = msg.toLowerCase();
+
+    if (q.includes('who') && (q.includes('president') || q.includes('found'))) {
+      return "Mason Scofield is the President & Co-Founder of MAIC. He leads the club's strategy, partnerships, and long-term growth.";
+    }
+    if (q.includes('vice president')) {
+      return "Alex Hollenbeck is the Vice President & Co-Founder. She drives operations and supports execution of programs, events, and member development.";
+    }
+    if (q.includes('treasurer')) {
+      return "Emily LaVal is the Treasurer & Co-Founder. She manages budgeting, funding, and financial planning for the club.";
+    }
+    if (q.includes('secretary')) {
+      return "Jack Nelson is the Secretary & Co-Founder. He keeps club communications, records, and coordination organized.";
+    }
+    if (q.includes('education chair') || (q.includes('zachary') || q.includes('zach'))) {
+      return "Zachary Johnson is the Education Chair & Co-Founder. He designs technical learning experiences, workshops, and AI skill-building resources.";
+    }
+    if (q.includes('ayan') || q.includes('professional relation')) {
+      return "Ayan Jan is the Professional Relations & Co-Founder. She builds relationships with alumni and professionals to expand career opportunities for members.";
+    }
+    if (q.includes('social media') || q.includes('angeline')) {
+      return "Angeline Jackson is the Social Media & Co-Founder. She leads MAIC's digital presence, content strategy, and storytelling across channels.";
+    }
+    if (q.includes('board') || q.includes('team') || q.includes('officers') || q.includes('co-founder')) {
+      return "MAIC's Executive Board (all Co-Founders):\n• Mason Scofield — President\n• Alex Hollenbeck — Vice President\n• Jack Nelson — Secretary\n• Emily LaVal — Treasurer\n• Zachary Johnson — Education Chair\n• Ayan Jan — Professional Relations\n• Angeline Jackson — Social Media";
+    }
+    if (q.includes('contact') || q.includes('email')) {
+      return "You can reach MAIC at madisonaiclub@gmail.com. You can also find us on LinkedIn or through JMU's BeInvolved page.";
+    }
+    if (q.includes('workshop')) {
+      return "MAIC runs weekly Technical Workshops — hands-on sessions led by the Education Chair (Zachary Johnson) covering the latest AI models, tools, frameworks, and research. These are available to members.";
+    }
+    if (q.includes('speaker')) {
+      return "MAIC hosts a monthly Guest Speaker Series with industry professionals. Past speakers include Joe Holmes from Codecademy and Yi Chen from World (Orb). Members only.";
+    }
+    if (q.includes('project')) {
+      return "MAIC runs semester-long Community Projects where members use AI to tackle real-world challenges and build practical experience. These are members-only.";
+    }
+    if (q.includes('join') || q.includes('how to get') || q.includes('membership') || q.includes('sign up')) {
+      return "To join MAIC, you can sign up through JMU's BeInvolved page or reach out at madisonaiclub@gmail.com. As a JMU student, you're eligible to become a member and gain access to workshops, speaker events, and projects!";
+    }
+    if (q.includes('what is maic') || q.includes('about maic') || q.includes('what does maic do')) {
+      return "MAIC (Madison AI Club) is a student organization at James Madison University, established in 2025. We bring together JMU students, industry professionals, and researchers to explore, build, and apply artificial intelligence — from weekly workshops to real-world projects. Our mission: Learn. Inspire. Teach. All Things AI.";
+    }
+    if (q.includes('breeze') || q.includes('newspaper') || q.includes('featured') || q.includes('press')) {
+      return "MAIC was featured in The Breeze, JMU's student newspaper, in an article titled \"What is the Madison Artificial Intelligence Club?\" — covering our mission, events, and the vision behind the club's founding.";
+    }
+    if (q.includes('nvtc') || q.includes('cyber summit') || q.includes('conference')) {
+      return "MAIC board members Ayan Jan, Mason Scofield, Errett Wallace, and John Nelson attended the NVTC 10th Annual Cyber Summit, gaining valuable insights into how AI, defense, and cybersecurity are evolving together.";
+    }
+    if (q.includes('joe holmes') || q.includes('codecademy')) {
+      return "Joe Holmes from Codecademy joined MAIC as a guest speaker. He shared insights about his career path, the evolving AI landscape, and how he built AI curriculum at Codecademy — engaging with both new and returning members.";
+    }
+    if (q.includes('location') || q.includes('where') || q.includes('harrisonburg') || q.includes('virginia')) {
+      return "MAIC is based at James Madison University in Harrisonburg, Virginia (VA 22807). We are affiliated with JMU Student Life.";
+    }
+    if (q.includes('program') || q.includes('what do you offer')) {
+      return "MAIC offers three core programs:\n1. 🛠 Technical Workshops — Weekly hands-on AI sessions (members)\n2. 🎤 Guest Speaker Series — Monthly industry professionals (members)\n3. 💡 Community Projects — Semester-long real-world AI projects (members)";
+    }
+    return null; // No local answer — send to API
+  }
+  // ===========================================================
+
   async function sendMessage() {
     const msg = inputEl.value.trim();
     if (!msg || isLoading) return;
 
-    // Topic filter — only allow MAIC / AI related questions
+    // Topic filter
     if (!isMAICRelated(msg)) {
       addMessage('user', msg);
-      inputEl.value = '';
-      inputEl.style.height = 'auto';
-      addMessage('bot', "I'm only able to answer questions about MAIC (Madison AI Club), its events, membership, and artificial intelligence topics. Feel free to ask me anything along those lines! 😊");
+      inputEl.value = ''; inputEl.style.height = 'auto';
+      addMessage('bot', "I'm only able to answer questions about MAIC (Madison AI Club), its programs, team, events, and AI topics. Feel free to ask me anything along those lines! 😊");
       return;
     }
 
     addMessage('user', msg);
-    inputEl.value = '';
-    inputEl.style.height = 'auto';
-    isLoading = true;
-    sendBtn.disabled = true;
+    inputEl.value = ''; inputEl.style.height = 'auto';
+
+    // Try local knowledge base first
+    const localAnswer = tryLocalAnswer(msg);
+    if (localAnswer) {
+      addMessage('bot', localAnswer);
+      return;
+    }
+
+    // Fall through to API
+    isLoading = true; sendBtn.disabled = true;
     const typingId = addTyping();
     try {
       const res = await fetch(MAIC_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg, isAuthenticated, userId: memberToken ? 'member' : null })
+        body: JSON.stringify({
+          message: MAIC_CONTEXT + '\n\nUser question: ' + msg,
+          isAuthenticated,
+          userId: memberToken ? 'member' : null
+        })
       });
       const data = await res.json();
       removeTyping(typingId);
@@ -319,8 +441,7 @@
       removeTyping(typingId);
       addMessage('bot', 'Connection error. Please try again.');
     }
-    isLoading = false;
-    sendBtn.disabled = false;
+    isLoading = false; sendBtn.disabled = false;
   }
 
   function addMessage(role, text) {
@@ -337,18 +458,14 @@
   function addTyping() {
     const id = 'typing-' + Date.now();
     const div = document.createElement('div');
-    div.className = 'maic-msg bot';
-    div.id = id;
+    div.className = 'maic-msg bot'; div.id = id;
     div.innerHTML = `<div class="avatar-sm">M</div><div class="bubble maic-typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`;
     messagesDiv.appendChild(div);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
     return id;
   }
 
-  function removeTyping(id) {
-    const el = document.getElementById(id);
-    if (el) el.remove();
-  }
+  function removeTyping(id) { const el = document.getElementById(id); if (el) el.remove(); }
 
   function escHtml(t) {
     return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
