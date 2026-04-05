@@ -3,3 +3,4 @@ cdk.out/
 *.js.map
 dist/
 lambda.zip
+CLAUDE.md

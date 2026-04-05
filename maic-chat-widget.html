@@ -404,8 +404,8 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     const msg = inputEl.value.trim();
     if (!msg || isLoading) return;
 
-    // Topic filter
-    if (!isMAICRelated(msg)) {
+    // Topic filter — skip if already in an established MAIC conversation
+    if (!isMAICRelated(msg) && conversationHistory.length === 0) {
       addMessage('user', msg);
       inputEl.value = ''; inputEl.style.height = 'auto';
       addMessage('bot', "I'm only able to answer questions about MAIC (Madison AI Club), its programs, team, events, and AI topics. Feel free to ask me anything along those lines! 😊");
@@ -419,6 +419,8 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     const localAnswer = tryLocalAnswer(msg);
     if (localAnswer) {
       addMessage('bot', localAnswer);
+      conversationHistory.push({ role: 'user', content: msg });
+      conversationHistory.push({ role: 'assistant', content: localAnswer });
       return;
     }
 
