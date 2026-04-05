@@ -1,6 +1,9 @@
 const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { CognitoIdentityProviderClient, GetUserCommand } = require("@aws-sdk/client-cognito-identity-provider");
+
+const cognito = new CognitoIdentityProviderClient({ region: process.env.AWS_REGION });
 
 const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -45,10 +48,23 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { message, userId, isAuthenticated } = body;
+    const { message } = body;
 
     if (!message || message.trim().length === 0) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };
+    }
+
+    // Server-side auth verification via Cognito GetUser
+    let isAuthenticated = false;
+    const authHeader = event.headers?.Authorization || event.headers?.authorization || "";
+    const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (accessToken) {
+      try {
+        await cognito.send(new GetUserCommand({ AccessToken: accessToken }));
+        isAuthenticated = true;
+      } catch {
+        isAuthenticated = false; // Token invalid or expired
+      }
     }
 
     // Guest rate limiting and topic filtering

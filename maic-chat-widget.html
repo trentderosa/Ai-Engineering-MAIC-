@@ -273,7 +273,7 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
       });
       const data = await res.json();
       if (data.AuthenticationResult) {
-        memberToken = data.AuthenticationResult.IdToken;
+        memberToken = data.AuthenticationResult.AccessToken;
         isAuthenticated = true;
         authBar.classList.add('member');
         authStatus.className = 'member';
@@ -425,13 +425,13 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     isLoading = true; sendBtn.disabled = true;
     const typingId = addTyping();
     try {
+      const reqHeaders = { 'Content-Type': 'application/json' };
+      if (memberToken) reqHeaders['Authorization'] = `Bearer ${memberToken}`;
       const res = await fetch(MAIC_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reqHeaders,
         body: JSON.stringify({
-          message: MAIC_CONTEXT + '\n\nUser question: ' + msg,
-          isAuthenticated,
-          userId: memberToken ? 'member' : null
+          message: MAIC_CONTEXT + '\n\nUser question: ' + msg
         })
       });
       const data = await res.json();
