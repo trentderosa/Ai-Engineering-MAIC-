@@ -8,6 +8,8 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const GUEST_DAILY_LIMIT = 10;
 const GUEST_MAX_TOKENS = 300;
 const MEMBER_MAX_TOKENS = 2000;
+const GUEST_HISTORY_WINDOW = 4;
+const MEMBER_HISTORY_WINDOW = 10;
 const TABLE_NAME = process.env.USAGE_TABLE;
 const MODEL_ID = "us.anthropic.claude-3-5-haiku-20241022-v1:0";
 
@@ -45,7 +47,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { message, userId, isAuthenticated } = body;
+    const { message, userId, isAuthenticated, history = [] } = body;
 
     if (!message || message.trim().length === 0) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };
@@ -83,6 +85,11 @@ exports.handler = async (event) => {
     }
 
     const maxTokens = isAuthenticated ? MEMBER_MAX_TOKENS : GUEST_MAX_TOKENS;
+    const historyWindow = isAuthenticated ? MEMBER_HISTORY_WINDOW : GUEST_HISTORY_WINDOW;
+
+    // Build messages array: sliding window of past turns + current message
+    const pastMessages = Array.isArray(history) ? history.slice(-historyWindow) : [];
+    const messages = [...pastMessages, { role: "user", content: message }];
 
     const response = await bedrock.send(new InvokeModelCommand({
       modelId: MODEL_ID,
@@ -92,7 +99,7 @@ exports.handler = async (event) => {
         anthropic_version: "bedrock-2023-05-31",
         max_tokens: maxTokens,
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: message }]
+        messages
       })
     }));
 

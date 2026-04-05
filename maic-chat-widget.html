@@ -217,6 +217,7 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
   let isAuthenticated = false;
   let memberToken = null;
   let isLoading = false;
+  let conversationHistory = [];
 
   const chatBtn     = document.getElementById('maic-chat-btn');
   const chatWindow  = document.getElementById('maic-chat-window');
@@ -241,7 +242,7 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
   };
 
   logoutBtn.onclick = () => {
-    isAuthenticated = false; memberToken = null;
+    isAuthenticated = false; memberToken = null; conversationHistory = [];
     authBar.classList.remove('member');
     authStatus.className = 'maic-auth-status';
     authStatus.textContent = '👤 Guest (limited access)';
@@ -431,12 +432,18 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
         body: JSON.stringify({
           message: MAIC_CONTEXT + '\n\nUser question: ' + msg,
           isAuthenticated,
-          userId: memberToken ? 'member' : null
+          userId: memberToken ? 'member' : null,
+          history: conversationHistory
         })
       });
       const data = await res.json();
       removeTyping(typingId);
-      addMessage('bot', data.reply || data.error || 'Sorry, something went wrong.');
+      const reply = data.reply || data.error || 'Sorry, something went wrong.';
+      addMessage('bot', reply);
+
+      // Append this turn to history
+      conversationHistory.push({ role: 'user', content: MAIC_CONTEXT + '\n\nUser question: ' + msg });
+      conversationHistory.push({ role: 'assistant', content: reply });
     } catch(e) {
       removeTyping(typingId);
       addMessage('bot', 'Connection error. Please try again.');
