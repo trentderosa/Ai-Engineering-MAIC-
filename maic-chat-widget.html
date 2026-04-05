@@ -328,7 +328,9 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     'bedrock', 'aws', 'amazon', 'cloud', 'api', 'lambda',
     'what is', 'how does', 'explain', 'tell me about', 'what are', 'help',
     'how to', 'learn', 'resource', 'project', 'research', 'career', 'internship',
-    'who', 'founder', 'contact', 'email', 'linkedin', 'program', 'mission'
+    'who', 'founder', 'contact', 'email', 'linkedin', 'program', 'mission',
+    'yi chen', 'world', 'orb', 'founded', 'established', 'started', 'beinvolved',
+    'beginner', 'experience', 'thanks', 'thank you', 'bye', 'goodbye'
   ];
 
   function isMAICRelated(msg) {
@@ -487,6 +489,44 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     }
     if (q.includes('program') || q.includes('what do you offer') || q.includes('what does maic offer')) {
       return "MAIC offers three core programs:\n1. Technical Workshops — Weekly hands-on AI sessions (members)\n2. Guest Speaker Series — Monthly industry professionals (members)\n3. Community Projects — Semester-long real-world AI projects (members)";
+    }
+
+    // ----- Yi Chen / World (Orb) speaker -----
+    if (q.includes('yi chen') || q.includes('world') || q.includes('orb')) {
+      return "Yi Chen from World (also known as Orb) joined MAIC as a guest speaker, sharing insights about AI applications and their work at World — a project focused on human identity verification using AI.";
+    }
+
+    // ----- Club history / founding -----
+    if (q.includes('when was') || q.includes('how old') || q.includes('founded') || q.includes('established') || q.includes('started') || (q.includes('when') && q.includes('maic'))) {
+      return "MAIC was founded in 2025 by seven co-founders: Mason Scofield, Alex Hollenbeck, Jack Nelson, Emily LaVal, Zachary Johnson, Ayan Jan, and Angeline Jackson — all at James Madison University.";
+    }
+
+    // ----- Mission -----
+    if (q.includes('mission') || q.includes('vision') || q.includes('goal') || q.includes('purpose') || q.includes('what does maic stand for') || q.includes('what does maic believe')) {
+      return "MAIC's mission is: Learn. Inspire. Teach. All Things AI. The club promotes ethical, responsible engagement with AI and connects JMU students to industry professionals, applied research, and career opportunities.";
+    }
+
+    // ----- Meeting frequency -----
+    if (q.includes('how often') || q.includes('how frequent') || q.includes('meeting schedule') || q.includes('when do you meet') || q.includes('when are meetings') || q.includes('when does maic meet')) {
+      return "MAIC runs weekly Technical Workshops and a monthly Guest Speaker Series. Check the BeInvolved page or email madisonaiclub@gmail.com for the current schedule and meeting times.";
+    }
+
+    // ----- BeInvolved -----
+    if (q.includes('beinvolved') || q.includes('be involved') || q.includes('jmu beinvolved')) {
+      return "You can find MAIC on JMU's BeInvolved platform at beinvolved.jmu.edu — that's where you can officially join and stay updated on events.";
+    }
+
+    // ----- What can this bot help with -----
+    if (q.includes('what can you') || q.includes('what do you know') || q.includes('what can i ask') || q.includes('help me with') || q.includes('what topics') || q.includes('capabilities') || q.includes('what questions')) {
+      return "I can help with:\n• MAIC info — team, programs, events, how to join\n• AI concepts — ML, LLMs, neural networks, RAG, agents, and more\n• JMU & MAIC-related career and research questions\n\nJust ask — I'll answer directly when I can, or connect you to the right info!";
+    }
+
+    // ----- Thanks / farewells -----
+    if (/^(thanks|thank you|thx|ty|cheers|appreciate it|appreciate that)[!., ]*$/.test(q)) {
+      return "Happy to help! Let me know if you have any other questions about MAIC.";
+    }
+    if (/^(bye|goodbye|see you|cya|later|take care|good night|gn)[!., ]*$/.test(q)) {
+      return "Goodbye! Feel free to come back anytime. Go Dukes! 💜";
     }
 
     return null; // No local answer — send to API
