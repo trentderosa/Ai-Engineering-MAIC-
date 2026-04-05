@@ -342,8 +342,14 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     const q = msg.toLowerCase().trim();
 
     // ----- Greetings -----
-    if (/^(hi|hello|hey|howdy|yo|sup|what'?s up|good morning|good afternoon|good evening|greetings)[!?.]*$/.test(q)) {
+    if (/^(hi+|hello+|hey+|howdy|yo+|sup|hiya|helo|good day|good morning|good afternoon|good evening|greetings)[!?., ]*((there|maic|assistant|bot|friend)[!?.,]*)?$/.test(q)) {
       return "Hey there! I'm the MAIC Assistant. Ask me anything about the Madison AI Club — our team, programs, events, or how to get involved!";
+    }
+    if (/^(what'?s up|wats up|wassup|whats up)[!?., ]*((with you|maic)?[!?.,]*)$/.test(q)) {
+      return "Not much — just here to help! Ask me anything about MAIC.";
+    }
+    if (/^how (are you|r u|are u|are you doing|is it going|'?s it going)[?!., ]*$/.test(q)) {
+      return "I'm doing great, thanks for asking! I'm the MAIC Assistant — here to answer your questions about the Madison AI Club. What would you like to know?";
     }
 
     // ----- Board members — specific people first, then general -----
@@ -368,19 +374,40 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     if (q.includes('social media') || q.includes('angeline')) {
       return "Angeline Jackson is the Social Media & Co-Founder. She leads MAIC's digital presence, content strategy, and storytelling across channels.";
     }
+    if (q.includes('errett') || q.includes('errett wallace')) {
+      return "Errett Wallace is an active MAIC member who attended the NVTC 10th Annual Cyber Summit alongside board members, representing the club in professional settings.";
+    }
+    if (q.includes('manages finance') || q.includes('handles finance') || q.includes('handles budget') || q.includes('manages budget') || q.includes('manages money') || q.includes('handles money') || q.includes('in charge of finance') || q.includes('in charge of budget')) {
+      return "Emily LaVal is the Treasurer & Co-Founder. She manages MAIC's budgeting, funding, and financial planning.";
+    }
+    if (q.includes('manages social') || q.includes('handles social') || q.includes('in charge of social') || q.includes('runs social') || q.includes('instagram') || q.includes('linkedin') || q.includes('social channel') || q.includes('online presence') || q.includes('digital presence')) {
+      return "Angeline Jackson is MAIC's Social Media & Co-Founder. She leads the club's digital presence, content strategy, and storytelling across channels like Instagram and LinkedIn.";
+    }
+    if (q.includes('manages education') || q.includes('handles education') || q.includes('in charge of education') || q.includes('runs workshop') || q.includes('leads workshop') || q.includes('teaches') || q.includes('curriculum')) {
+      return "Zachary Johnson is the Education Chair & Co-Founder. He designs technical learning experiences, workshops, and AI skill-building resources for MAIC.";
+    }
+    if (q.includes('professional relation') || q.includes('manages relation') || q.includes('handles relation') || q.includes('networking') || q.includes('alumni') || q.includes('industry connect') || q.includes('career opportunit')) {
+      return "Ayan Jan is MAIC's Professional Relations & Co-Founder. She builds relationships with alumni and industry professionals to expand career opportunities for members.";
+    }
     if (q.includes('board') || q.includes('executive team') || q.includes('officers') || q.includes('co-founder') || q.includes('who runs') || q.includes('who leads') || q.includes('who founded') || q.includes('who started') || (q.includes('team') && q.includes('maic'))) {
       return "MAIC's Executive Board (all Co-Founders):\n• Mason Scofield — President\n• Alex Hollenbeck — Vice President\n• Jack Nelson — Secretary\n• Emily LaVal — Treasurer\n• Zachary Johnson — Education Chair\n• Ayan Jan — Professional Relations\n• Angeline Jackson — Social Media";
     }
 
     // ----- Getting involved -----
-    if (q.includes('get involved') || q.includes('become a member') || q.includes('how do i join') || q.includes('how can i join') || q.includes('join') || q.includes('membership') || q.includes('sign up') || q.includes('how to get')) {
+    if (q.includes('get involved') || q.includes('become a member') || q.includes('how do i join') || q.includes('how can i join') || q.includes('join') || q.includes('membership') || q.includes('sign up') || q.includes('how to get') || q.includes('i want to join') || q.includes('interested in joining') || q.includes('how do i get started') || q.includes('get started with maic')) {
       return "To join MAIC, sign up through JMU's BeInvolved page or email us at madisonaiclub@gmail.com. Any JMU student is welcome — membership gives you access to weekly workshops, monthly speakers, and semester-long AI projects!";
     }
-    if (q.includes('benefit') || q.includes('why join') || q.includes('what do i get') || q.includes('what will i learn') || q.includes('worth it')) {
+    if (q.includes('benefit') || q.includes('why join') || q.includes('what do i get') || q.includes('what will i learn') || q.includes('worth it') || q.includes('what do members get') || q.includes('what do you get')) {
       return "Joining MAIC gets you:\n• Hands-on weekly AI workshops\n• Monthly talks from industry professionals\n• Semester-long real-world AI projects\n• Mentorship from experienced members\n• Career exposure through our speaker network";
     }
     if (q.includes('free') || q.includes('cost') || q.includes('dues') || (q.includes('fee') && q.includes('member'))) {
       return "MAIC membership is open to all JMU students — reach out at madisonaiclub@gmail.com or check our BeInvolved page for current details on membership and any dues.";
+    }
+    if (q.includes('no experience') || q.includes('beginner') || q.includes('new to ai') || q.includes('never studied ai') || q.includes('don\'t know ai') || q.includes('dont know ai') || q.includes('need experience') || q.includes('require experience') || q.includes('prerequisite') || q.includes('background required') || q.includes('any skill') || q.includes('any major')) {
+      return "No prior experience needed! MAIC welcomes all JMU students regardless of major or background. Our workshops are designed to meet you where you are — whether you're brand new to AI or already have experience.";
+    }
+    if (q.includes('who can join') || q.includes('am i eligible') || q.includes('can i join') || q.includes('open to all') || q.includes('any student') || q.includes('all students') || q.includes('what major') || q.includes('any major')) {
+      return "MAIC is open to all JMU students — any major, any experience level. Whether you're studying CS, business, art, or anything else, you're welcome at MAIC!";
     }
 
     // ----- General AI concepts -----
@@ -407,6 +434,27 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     }
     if ((q.includes('what is ai') || q.includes('what is artificial intelligence') || q.includes('explain ai') || q.includes('define ai') || q.includes('explain artificial intelligence')) && !q.includes('maic')) {
       return "Artificial Intelligence (AI) is the simulation of human intelligence by machines — enabling them to reason, learn, plan, and understand language. Modern AI relies on machine learning and neural networks trained on large datasets. MAIC is all about exploring and applying AI — from foundational concepts to cutting-edge tools!";
+    }
+    if ((q.includes('reinforcement learning') || q.includes('rl agent') || (q.includes('rl') && q.includes('learn'))) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "Reinforcement learning (RL) is a type of machine learning where an agent learns by interacting with an environment — taking actions, receiving rewards or penalties, and improving over time. RL powers systems like game-playing AIs (AlphaGo, OpenAI Five) and robotics control. MAIC's workshops often touch on RL fundamentals!";
+    }
+    if ((q.includes('supervised learning') || q.includes('unsupervised learning') || q.includes('supervised vs') || q.includes('vs unsupervised')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('difference') || q.includes('how does') || q.includes('how do'))) {
+      return "Supervised learning trains models on labeled data (input-output pairs) to predict outputs for new inputs — e.g., spam detection, image classification. Unsupervised learning finds hidden structure in unlabeled data — e.g., clustering, anomaly detection. Both are core ML paradigms covered in MAIC workshops!";
+    }
+    if ((q.includes('generative ai') || q.includes('gen ai') || q.includes('genai')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "Generative AI refers to AI systems that can create new content — text, images, code, audio, or video — by learning patterns from existing data. Models like Claude, GPT-4, DALL-E, and Stable Diffusion are examples. Generative AI is one of the most active areas in modern AI and a central topic at MAIC!";
+    }
+    if ((q.includes('fine-tun') || q.includes('fine tun') || q.includes('finetuning') || q.includes('finetune')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "Fine-tuning is the process of taking a pre-trained model (like an LLM) and continuing to train it on a smaller, task-specific dataset — adapting it to a particular domain or behavior without training from scratch. It's a key technique for customizing AI models, and it comes up often in MAIC's advanced workshops.";
+    }
+    if ((q.includes('prompt engineering') || q.includes('prompt design') || q.includes('prompting')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "Prompt engineering is the practice of crafting inputs (prompts) to AI models to elicit better, more accurate, or more useful outputs. Techniques include chain-of-thought prompting, few-shot examples, role assignment, and output formatting. It's a highly practical skill MAIC members learn in workshops!";
+    }
+    if ((q.includes('rag') || q.includes('retrieval augmented') || q.includes('retrieval-augmented')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "Retrieval-Augmented Generation (RAG) is a technique that combines an LLM with an external knowledge base. Instead of relying only on its training data, the model retrieves relevant documents at query time and uses them to generate more accurate, up-to-date answers. RAG is widely used in production AI applications and is a topic MAIC covers in workshops!";
+    }
+    if ((q.includes('ai agent') || q.includes('agentic ai') || q.includes('autonomous agent') || q.includes('what is an agent')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do') || q.includes('agent'))) {
+      return "An AI agent is an AI system that can take actions autonomously to achieve a goal — not just answer questions, but plan steps, use tools, browse the web, write and run code, and adapt based on feedback. Agentic AI is one of the fastest-moving areas of the field and a hot topic in MAIC discussions and workshops!";
     }
 
     // ----- Contact & programs -----
