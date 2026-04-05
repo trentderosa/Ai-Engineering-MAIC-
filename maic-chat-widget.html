@@ -217,6 +217,9 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
   let isAuthenticated = false;
   let memberToken = null;
   let isLoading = false;
+  let sessionMessageCount = 0;
+  const GUEST_MSG_CAP = 10;
+  const MEMBER_MSG_CAP = 30;
 
   const chatBtn     = document.getElementById('maic-chat-btn');
   const chatWindow  = document.getElementById('maic-chat-window');
@@ -403,16 +406,32 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     const msg = inputEl.value.trim();
     if (!msg || isLoading) return;
 
+    // Session cap check
+    const cap = isAuthenticated ? MEMBER_MSG_CAP : GUEST_MSG_CAP;
+    if (sessionMessageCount >= cap) {
+      if (!isAuthenticated) {
+        addMessage('bot', `You've reached the guest limit of ${GUEST_MSG_CAP} messages per session. Sign in as a MAIC member to continue chatting with a higher limit!`);
+      } else {
+        addMessage('bot', `You've reached the member limit of ${MEMBER_MSG_CAP} messages per session. Please start a new session to continue.`);
+      }
+      inputEl.value = ''; inputEl.style.height = 'auto';
+      inputEl.disabled = true;
+      sendBtn.disabled = true;
+      return;
+    }
+
     // Topic filter
     if (!isMAICRelated(msg)) {
       addMessage('user', msg);
       inputEl.value = ''; inputEl.style.height = 'auto';
+      sessionMessageCount++;
       addMessage('bot', "I'm only able to answer questions about MAIC (Madison AI Club), its programs, team, events, and AI topics. Feel free to ask me anything along those lines! 😊");
       return;
     }
 
     addMessage('user', msg);
     inputEl.value = ''; inputEl.style.height = 'auto';
+    sessionMessageCount++;
 
     // Try local knowledge base first
     const localAnswer = tryLocalAnswer(msg);
