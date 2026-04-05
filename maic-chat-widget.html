@@ -339,21 +339,27 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
 
   // ===== LOCAL KNOWLEDGE BASE (fast answers without API) =====
   function tryLocalAnswer(msg) {
-    const q = msg.toLowerCase();
+    const q = msg.toLowerCase().trim();
 
-    if (q.includes('who') && (q.includes('president') || q.includes('found'))) {
+    // ----- Greetings -----
+    if (/^(hi|hello|hey|howdy|yo|sup|what'?s up|good morning|good afternoon|good evening|greetings)[!?.]*$/.test(q)) {
+      return "Hey there! I'm the MAIC Assistant. Ask me anything about the Madison AI Club — our team, programs, events, or how to get involved!";
+    }
+
+    // ----- Board members — specific people first, then general -----
+    if (q.includes('mason') || (q.includes('president') && !q.includes('vice'))) {
       return "Mason Scofield is the President & Co-Founder of MAIC. He leads the club's strategy, partnerships, and long-term growth.";
     }
-    if (q.includes('vice president')) {
+    if (q.includes('vice president') || q.includes('alex hollenbeck') || q.includes('alex h')) {
       return "Alex Hollenbeck is the Vice President & Co-Founder. She drives operations and supports execution of programs, events, and member development.";
     }
-    if (q.includes('treasurer')) {
+    if (q.includes('treasurer') || q.includes('emily')) {
       return "Emily LaVal is the Treasurer & Co-Founder. She manages budgeting, funding, and financial planning for the club.";
     }
-    if (q.includes('secretary')) {
+    if (q.includes('secretary') || q.includes('jack nelson') || q.includes('jack n')) {
       return "Jack Nelson is the Secretary & Co-Founder. He keeps club communications, records, and coordination organized.";
     }
-    if (q.includes('education chair') || (q.includes('zachary') || q.includes('zach'))) {
+    if (q.includes('education chair') || q.includes('zachary') || q.includes('zach')) {
       return "Zachary Johnson is the Education Chair & Co-Founder. He designs technical learning experiences, workshops, and AI skill-building resources.";
     }
     if (q.includes('ayan') || q.includes('professional relation')) {
@@ -362,10 +368,49 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     if (q.includes('social media') || q.includes('angeline')) {
       return "Angeline Jackson is the Social Media & Co-Founder. She leads MAIC's digital presence, content strategy, and storytelling across channels.";
     }
-    if (q.includes('board') || q.includes('team') || q.includes('officers') || q.includes('co-founder')) {
+    if (q.includes('board') || q.includes('executive team') || q.includes('officers') || q.includes('co-founder') || q.includes('who runs') || q.includes('who leads') || q.includes('who founded') || q.includes('who started') || (q.includes('team') && q.includes('maic'))) {
       return "MAIC's Executive Board (all Co-Founders):\n• Mason Scofield — President\n• Alex Hollenbeck — Vice President\n• Jack Nelson — Secretary\n• Emily LaVal — Treasurer\n• Zachary Johnson — Education Chair\n• Ayan Jan — Professional Relations\n• Angeline Jackson — Social Media";
     }
-    if (q.includes('contact') || q.includes('email')) {
+
+    // ----- Getting involved -----
+    if (q.includes('get involved') || q.includes('become a member') || q.includes('how do i join') || q.includes('how can i join') || q.includes('join') || q.includes('membership') || q.includes('sign up') || q.includes('how to get')) {
+      return "To join MAIC, sign up through JMU's BeInvolved page or email us at madisonaiclub@gmail.com. Any JMU student is welcome — membership gives you access to weekly workshops, monthly speakers, and semester-long AI projects!";
+    }
+    if (q.includes('benefit') || q.includes('why join') || q.includes('what do i get') || q.includes('what will i learn') || q.includes('worth it')) {
+      return "Joining MAIC gets you:\n• Hands-on weekly AI workshops\n• Monthly talks from industry professionals\n• Semester-long real-world AI projects\n• Mentorship from experienced members\n• Career exposure through our speaker network";
+    }
+    if (q.includes('free') || q.includes('cost') || q.includes('dues') || (q.includes('fee') && q.includes('member'))) {
+      return "MAIC membership is open to all JMU students — reach out at madisonaiclub@gmail.com or check our BeInvolved page for current details on membership and any dues.";
+    }
+
+    // ----- General AI concepts -----
+    if (q.includes('machine learning') && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does'))) {
+      return "Machine learning (ML) is a branch of AI where systems learn from data to make predictions or decisions — without being explicitly programmed for each task. Instead of hand-coded rules, an ML model finds patterns in training data and generalizes them to new inputs. MAIC covers ML hands-on in our weekly workshops!";
+    }
+    if ((q.includes('llm') || q.includes('large language model')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "A Large Language Model (LLM) is a type of AI trained on massive text datasets to understand and generate human language. LLMs like Claude, GPT-4, and Llama learn statistical patterns across billions of words, enabling them to answer questions, write code, summarize documents, and more. MAIC explores LLMs in depth — they're a core part of our workshops!";
+    }
+    if (q.includes('neural network') && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does') || q.includes('how do'))) {
+      return "A neural network is a computational model loosely inspired by the human brain. It's made of layers of interconnected nodes (neurons) that transform input data through learned weights. Deep neural networks — with many layers — power modern AI including image recognition, speech recognition, and LLMs. MAIC covers neural networks in our AI workshops!";
+    }
+    if (q.includes('deep learning') && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does'))) {
+      return "Deep learning is a subset of machine learning that uses neural networks with many layers to learn complex representations from raw data. It powers breakthroughs like image recognition, speech synthesis, and large language models. MAIC's technical workshops often dive into deep learning fundamentals and applications.";
+    }
+    if (q.includes('transformer') && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does'))) {
+      return "The Transformer is a neural network architecture (introduced in \"Attention is All You Need\", 2017) that became the foundation of modern LLMs. Its self-attention mechanism allows the model to weigh relationships between all tokens in a sequence at once — enabling far more scalable and powerful training than earlier RNN-based approaches.";
+    }
+    if ((q.includes('nlp') || q.includes('natural language processing')) && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does'))) {
+      return "Natural Language Processing (NLP) is the field of AI focused on enabling computers to understand, interpret, and generate human language. NLP powers chatbots, translation, sentiment analysis, and LLMs — and it's a frequent topic in MAIC's workshops!";
+    }
+    if (q.includes('computer vision') && (q.includes('what is') || q.includes('what are') || q.includes('explain') || q.includes('define') || q.includes('how does'))) {
+      return "Computer vision is the area of AI that teaches machines to interpret visual information from images and video. Applications include facial recognition, self-driving cars, medical imaging, and object detection — a popular topic in AI research and MAIC workshops.";
+    }
+    if ((q.includes('what is ai') || q.includes('what is artificial intelligence') || q.includes('explain ai') || q.includes('define ai') || q.includes('explain artificial intelligence')) && !q.includes('maic')) {
+      return "Artificial Intelligence (AI) is the simulation of human intelligence by machines — enabling them to reason, learn, plan, and understand language. Modern AI relies on machine learning and neural networks trained on large datasets. MAIC is all about exploring and applying AI — from foundational concepts to cutting-edge tools!";
+    }
+
+    // ----- Contact & programs -----
+    if (q.includes('contact') || q.includes('email') || q.includes('reach out')) {
       return "You can reach MAIC at madisonaiclub@gmail.com. You can also find us on LinkedIn or through JMU's BeInvolved page.";
     }
     if (q.includes('workshop')) {
@@ -377,10 +422,7 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     if (q.includes('project')) {
       return "MAIC runs semester-long Community Projects where members use AI to tackle real-world challenges and build practical experience. These are members-only.";
     }
-    if (q.includes('join') || q.includes('how to get') || q.includes('membership') || q.includes('sign up')) {
-      return "To join MAIC, you can sign up through JMU's BeInvolved page or reach out at madisonaiclub@gmail.com. As a JMU student, you're eligible to become a member and gain access to workshops, speaker events, and projects!";
-    }
-    if (q.includes('what is maic') || q.includes('about maic') || q.includes('what does maic do')) {
+    if (q.includes('what is maic') || q.includes('about maic') || q.includes('what does maic do') || q.includes('tell me about maic')) {
       return "MAIC (Madison AI Club) is a student organization at James Madison University, established in 2025. We bring together JMU students, industry professionals, and researchers to explore, build, and apply artificial intelligence — from weekly workshops to real-world projects. Our mission: Learn. Inspire. Teach. All Things AI.";
     }
     if (q.includes('breeze') || q.includes('newspaper') || q.includes('featured') || q.includes('press')) {
@@ -392,12 +434,13 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     if (q.includes('joe holmes') || q.includes('codecademy')) {
       return "Joe Holmes from Codecademy joined MAIC as a guest speaker. He shared insights about his career path, the evolving AI landscape, and how he built AI curriculum at Codecademy — engaging with both new and returning members.";
     }
-    if (q.includes('location') || q.includes('where') || q.includes('harrisonburg') || q.includes('virginia')) {
+    if (q.includes('location') || (q.includes('where') && (q.includes('maic') || q.includes('club') || q.includes('meet'))) || q.includes('harrisonburg') || q.includes('virginia')) {
       return "MAIC is based at James Madison University in Harrisonburg, Virginia (VA 22807). We are affiliated with JMU Student Life.";
     }
-    if (q.includes('program') || q.includes('what do you offer')) {
-      return "MAIC offers three core programs:\n1. 🛠 Technical Workshops — Weekly hands-on AI sessions (members)\n2. 🎤 Guest Speaker Series — Monthly industry professionals (members)\n3. 💡 Community Projects — Semester-long real-world AI projects (members)";
+    if (q.includes('program') || q.includes('what do you offer') || q.includes('what does maic offer')) {
+      return "MAIC offers three core programs:\n1. Technical Workshops — Weekly hands-on AI sessions (members)\n2. Guest Speaker Series — Monthly industry professionals (members)\n3. Community Projects — Semester-long real-world AI projects (members)";
     }
+
     return null; // No local answer — send to API
   }
   // ===========================================================
