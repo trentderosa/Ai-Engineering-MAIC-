@@ -158,9 +158,9 @@
 
 <script>
   // ===== CONFIG =====
-  const MAIC_API_URL = 'https://c6epuyktfc.execute-api.us-east-1.amazonaws.com/prod/chat';
-  const MAIC_USER_POOL_ID = 'us-east-1_2eenG9yf1';
-  const MAIC_CLIENT_ID = '6tou1q5kq1pppqnrgk6e4ia33g';
+  const MAIC_API_URL = 'https://4u5er55de0.execute-api.us-east-1.amazonaws.com/prod/chat';
+  const MAIC_USER_POOL_ID = 'us-east-1_X2eoUCyds';
+  const MAIC_CLIENT_ID = '2t11b1grjqnl7kev2udjki4tnh';
   const MAIC_REGION = 'us-east-1';
 
   // ===== MAIC KNOWLEDGE BASE =====
@@ -326,11 +326,13 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     'prompt', 'inference', 'fine-tun', 'reinforcement', 'supervised', 'unsupervised',
     'classification', 'regression', 'clustering', 'generative', 'diffusion',
     'bedrock', 'aws', 'amazon', 'cloud', 'api', 'lambda',
+    'what', 'how', 'who', 'when', 'where', 'why', 'can you', 'tell me',
     'what is', 'how does', 'explain', 'tell me about', 'what are', 'help',
     'how to', 'learn', 'resource', 'project', 'research', 'career', 'internship',
-    'who', 'founder', 'contact', 'email', 'linkedin', 'program', 'mission',
+    'founder', 'contact', 'email', 'linkedin', 'program', 'mission',
     'yi chen', 'world', 'orb', 'founded', 'established', 'started', 'beinvolved',
-    'beginner', 'experience', 'thanks', 'thank you', 'bye', 'goodbye'
+    'beginner', 'experience', 'thanks', 'thank you', 'bye', 'goodbye',
+    'hi', 'hello', 'hey', 'yo', 'sup', 'hiya'
   ];
 
   function isMAICRelated(msg) {
@@ -358,13 +360,13 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     if (q.includes('mason') || (q.includes('president') && !q.includes('vice'))) {
       return "Mason Scofield is the President & Co-Founder of MAIC. He leads the club's strategy, partnerships, and long-term growth.";
     }
-    if (q.includes('vice president') || q.includes('alex hollenbeck') || q.includes('alex h')) {
-      return "Alex Hollenbeck is the Vice President & Co-Founder. She drives operations and supports execution of programs, events, and member development.";
+    if (q.includes('vice president') || q.includes('alex') || q.includes('hollenbeck')) {
+      return "Alex Hollenbeck is the Vice President & Co-Founder. He drives operations and supports execution of programs, events, and member development.";
     }
-    if (q.includes('treasurer') || q.includes('emily')) {
+    if (q.includes('treasurer') || q.includes('emily') || q.includes('laval')) {
       return "Emily LaVal is the Treasurer & Co-Founder. She manages budgeting, funding, and financial planning for the club.";
     }
-    if (q.includes('secretary') || q.includes('jack nelson') || q.includes('jack n')) {
+    if (q.includes('secretary') || q.includes('jack') || q.includes('nelson')) {
       return "Jack Nelson is the Secretary & Co-Founder. He keeps club communications, records, and coordination organized.";
     }
     if (q.includes('education chair') || q.includes('zachary') || q.includes('zach')) {
@@ -391,7 +393,7 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
     if (q.includes('professional relation') || q.includes('manages relation') || q.includes('handles relation') || q.includes('networking') || q.includes('alumni') || q.includes('industry connect') || q.includes('career opportunit')) {
       return "Ayan Jan is MAIC's Professional Relations & Co-Founder. She builds relationships with alumni and industry professionals to expand career opportunities for members.";
     }
-    if (q.includes('board') || q.includes('executive team') || q.includes('officers') || q.includes('co-founder') || q.includes('who runs') || q.includes('who leads') || q.includes('who founded') || q.includes('who started') || (q.includes('team') && q.includes('maic'))) {
+    if (q.includes('board') || q.includes('exec') || q.includes('executive') || q.includes('officers') || q.includes('co-founder') || q.includes('who runs') || q.includes('who leads') || q.includes('who founded') || q.includes('who started') || (q.includes('team') && q.includes('maic'))) {
       return "MAIC's Executive Board (all Co-Founders):\n• Mason Scofield — President\n• Alex Hollenbeck — Vice President\n• Jack Nelson — Secretary\n• Emily LaVal — Treasurer\n• Zachary Johnson — Education Chair\n• Ayan Jan — Professional Relations\n• Angeline Jackson — Social Media";
     }
 
