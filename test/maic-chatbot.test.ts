@@ -1,17 +1,5 @@
-// import * as cdk from 'aws-cdk-lib/core';
-// import { Template } from 'aws-cdk-lib/assertions';
-// import * as MaicChatbot from '../lib/maic-chatbot-stack';
-
-// example test. To run these tests, uncomment this file along with the
-// example resource in lib/maic-chatbot-stack.ts
-test('SQS Queue Created', () => {
-//   const app = new cdk.App();
-//     // WHEN
-//   const stack = new MaicChatbot.MaicChatbotStack(app, 'MyTestStack');
-//     // THEN
-//   const template = Template.fromStack(stack);
-
-//   template.hasResourceProperties('AWS::SQS::Queue', {
-//     VisibilityTimeout: 300
-//   });
-});
+// CDK stack tests — placeholder for future infrastructure assertions.
+// Lambda logic tests live in test/lambda.test.ts.
+test.todo("CDK stack creates DynamoDB table");
+test.todo("CDK stack creates Cognito User Pool");
+test.todo("CDK stack creates API Gateway with /chat route");

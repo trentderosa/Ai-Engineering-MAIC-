@@ -1,9 +1,16 @@
 const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { CognitoJwtVerifier } = require("aws-jwt-verify");
 
 const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
+const jwtVerifier = CognitoJwtVerifier.create({
+  userPoolId: process.env.USER_POOL_ID,
+  tokenUse: "access",
+  clientId: process.env.USER_POOL_CLIENT_ID,
+});
 
 const GUEST_DAILY_LIMIT = 10;
 const GUEST_MAX_TOKENS = 300;
@@ -26,10 +33,16 @@ function getTodayKey() {
   return new Date().toISOString().split("T")[0];
 }
 
+// Exported for unit testing
+exports.getTodayKey = getTodayKey;
+
 function isTopicAllowed(message) {
   const lower = message.toLowerCase();
   return ALLOWED_GUEST_KEYWORDS.some(kw => lower.includes(kw));
 }
+
+// Exported for unit testing
+exports.isTopicAllowed = isTopicAllowed;
 
 exports.handler = async (event) => {
   const headers = {
@@ -45,7 +58,21 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { message, userId, isAuthenticated } = body;
+    const { message, userId } = body;
+
+    // Verify JWT from Authorization header — never trust client-sent isAuthenticated
+    let isAuthenticated = false;
+    const authHeader = event.headers?.Authorization || event.headers?.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (token) {
+      try {
+        await jwtVerifier.verify(token);
+        isAuthenticated = true;
+      } catch {
+        // Invalid or expired token — treat as guest
+        isAuthenticated = false;
+      }
+    }
 
     if (!message || message.trim().length === 0) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };
