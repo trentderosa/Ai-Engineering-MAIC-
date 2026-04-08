@@ -1,6 +1,6 @@
 const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, GetCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
 
 const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -45,7 +45,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { message, userId, isAuthenticated } = body;
+    const { message, isAuthenticated } = body;
 
     if (!message || message.trim().length === 0) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };

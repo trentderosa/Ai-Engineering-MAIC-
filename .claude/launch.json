@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Widget Preview Server",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["http-server", ".", "-p", "3000", "--cors", "-c-1"],
+      "port": 3000
+    },
+    {
+      "name": "TypeScript Watch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "watch"],
+      "port": null
+    }
+  ]
+}

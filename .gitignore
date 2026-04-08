@@ -1,4 +1,5 @@
 node_modules/
+CLAUDE.local.md
 cdk.out/
 *.js.map
 dist/
