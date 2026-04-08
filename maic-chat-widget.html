@@ -163,61 +163,33 @@
   const MAIC_CLIENT_ID = '6tou1q5kq1pppqnrgk6e4ia33g';
   const MAIC_REGION = 'us-east-1';
 
-  // ===== MAIC KNOWLEDGE BASE =====
-  const MAIC_CONTEXT = `
-You are the official assistant for MAIC — the Madison AI Club at James Madison University (JMU), established in 2025.
-
-ABOUT MAIC:
-MAIC brings together JMU students, industry professionals, and researchers to explore, build, and apply artificial intelligence — from weekly workshops to real-world projects. The club promotes ethical, responsible engagement with AI, connecting JMU students to industry professionals, applied research, and career opportunities.
-
-MISSION: Learn. Inspire. Teach. All Things AI.
-
-LOCATION: James Madison University, Harrisonburg, VA 22807
-
-CONTACT: madisonaiclub@gmail.com
-
-PROGRAMS:
-1. Technical Workshops — Hands-on weekly sessions led by the Education Chair covering the latest AI models, tools, frameworks, and research. Members only.
-2. Guest Speaker Series — Monthly sessions with industry professionals sharing insights on their careers and work in AI. Past speakers include leaders from Codecademy (Joe Holmes) and World/Orb (Yi Chen). Members only.
-3. Community Projects — Semester-long committee projects where members use AI to tackle real-world challenges and build practical technical experience. Members only.
-
-KEY BENEFITS:
-- Mentorship: Experienced members guide newcomers through AI projects and career development.
-- Industry Exposure: Monthly guest speakers from leading tech companies and AI organizations.
-- Impact: Semester-long projects using AI to address real challenges.
-
-EXECUTIVE BOARD (Co-Founders):
-- Mason Scofield — President & Co-Founder. Leads club strategy, partnerships, and long-term growth.
-- Alex Hollenbeck — Vice President & Co-Founder. Drives operations and supports execution of programs and events.
-- Jack Nelson — Secretary & Co-Founder. Keeps club communications, records, and coordination organized.
-- Emily LaVal — Treasurer & Co-Founder. Manages budgeting, funding, and financial planning.
-- Zachary Johnson — Education Chair & Co-Founder. Designs technical learning experiences and workshops.
-- Ayan Jan — Professional Relations & Co-Founder. Builds relationships with alumni and professionals for career opportunities.
-- Angeline Jackson — Social Media & Co-Founder. Leads digital presence, content strategy, and storytelling.
-
-NEWS & HIGHLIGHTS:
-- Featured in The Breeze (JMU's student newspaper): "What is the Madison Artificial Intelligence Club?"
-- Speaker Series: Joe Holmes from Codecademy joined MAIC, sharing insights about his career path and the evolving AI landscape.
-- Conference: Board members Ayan Jan, Mason Scofield, Errett Wallace, and John Nelson attended the NVTC 10th Annual Cyber Summit, gaining insights into AI, defense, and cybersecurity.
-
-LINKS:
-- JMU Website: jmu.edu
-- BeInvolved Page: beinvolved.jmu.edu
-- Breeze Article about MAIC
-- LinkedIn: Club has an active LinkedIn presence
-
-MEMBERSHIP:
-- Open to JMU students
-- Sign in via the Member Portal for full access to workshops, speakers, and projects
-- Affiliated with JMU Student Life
-
-Only answer questions related to MAIC, its programs, team, AI topics, and JMU. For anything unrelated, politely redirect the user to MAIC topics.
-`;
-
   let isAuthenticated = false;
   let memberToken = null;
+  let memberUserId = null;
   let isLoading = false;
-  let conversationHistory = [];
+
+  // Guest history is persisted in localStorage across page refreshes.
+  // Member history lives server-side (DDB) — we only track it here for display.
+  const GUEST_SESSION_KEY = 'maic_guest_session';
+
+  function loadGuestSession() {
+    try {
+      const saved = localStorage.getItem(GUEST_SESSION_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { history: [] };
+  }
+
+  function saveGuestSession(history) {
+    localStorage.setItem(GUEST_SESSION_KEY, JSON.stringify({ history }));
+  }
+
+  function getJwtSub(token) {
+    try { return JSON.parse(atob(token.split('.')[1])).sub; } catch { return null; }
+  }
+
+  let guestSession = loadGuestSession();
+  let conversationHistory = guestSession.history;
 
   const chatBtn     = document.getElementById('maic-chat-btn');
   const chatWindow  = document.getElementById('maic-chat-window');
@@ -242,7 +214,10 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
   };
 
   logoutBtn.onclick = () => {
-    isAuthenticated = false; memberToken = null; conversationHistory = [];
+    isAuthenticated = false; memberToken = null; memberUserId = null;
+    // Restore guest session from localStorage on logout
+    guestSession = loadGuestSession();
+    conversationHistory = guestSession.history;
     authBar.classList.remove('member');
     authStatus.className = 'maic-auth-status';
     authStatus.textContent = '👤 Guest (limited access)';
@@ -275,7 +250,9 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
       const data = await res.json();
       if (data.AuthenticationResult) {
         memberToken = data.AuthenticationResult.IdToken;
+        memberUserId = getJwtSub(memberToken);
         isAuthenticated = true;
+        conversationHistory = []; // member history is server-side; start fresh display
         authBar.classList.add('member');
         authStatus.className = 'member';
         authStatus.textContent = '✅ Signed in as member';
@@ -421,6 +398,7 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
       addMessage('bot', localAnswer);
       conversationHistory.push({ role: 'user', content: msg });
       conversationHistory.push({ role: 'assistant', content: localAnswer });
+      if (!isAuthenticated) saveGuestSession(conversationHistory);
       return;
     }
 
@@ -432,10 +410,10 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: MAIC_CONTEXT + '\n\nUser question: ' + msg,
+          message: msg,                           // plain message — context is in Lambda's system prompt
           isAuthenticated,
-          userId: memberToken ? 'member' : null,
-          history: conversationHistory
+          userId: memberUserId,                   // Cognito sub (null for guests)
+          history: isAuthenticated ? [] : conversationHistory  // members: backend loads from DDB
         })
       });
       const data = await res.json();
@@ -443,9 +421,12 @@ Only answer questions related to MAIC, its programs, team, AI topics, and JMU. F
       const reply = data.reply || data.error || 'Sorry, something went wrong.';
       addMessage('bot', reply);
 
-      // Append this turn to history
-      conversationHistory.push({ role: 'user', content: MAIC_CONTEXT + '\n\nUser question: ' + msg });
-      conversationHistory.push({ role: 'assistant', content: reply });
+      // Track history client-side for guests only (members are server-side)
+      if (!isAuthenticated) {
+        conversationHistory.push({ role: 'user', content: msg });
+        conversationHistory.push({ role: 'assistant', content: reply });
+        saveGuestSession(conversationHistory);
+      }
     } catch(e) {
       removeTyping(typingId);
       addMessage('bot', 'Connection error. Please try again.');
