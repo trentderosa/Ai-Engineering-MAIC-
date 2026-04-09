@@ -105,7 +105,7 @@
     #maic-send-btn:disabled { background: #ccc; cursor: not-allowed; }
     #maic-send-btn svg { width: 18px; height: 18px; fill: white; }
     #maic-guest-note { font-size: 11px; color: #999; text-align: center; padding: 4px 12px 0; background: white; }
-  </style>
+</style>
 </head>
 <body>
 
@@ -165,12 +165,12 @@
 
   let isAuthenticated = false;
   let memberToken = null;
-  let memberUserId = null;
   let isLoading = false;
 
   // Guest history is persisted in localStorage across page refreshes.
   // Member history lives server-side (DDB) — we only track it here for display.
   const GUEST_SESSION_KEY = 'maic_guest_session';
+  const GUEST_CLIENT_CAP = 20; // max messages stored in localStorage (prevents payload bloat)
 
   function loadGuestSession() {
     try {
@@ -184,12 +184,11 @@
     localStorage.setItem(GUEST_SESSION_KEY, JSON.stringify({ history }));
   }
 
-  function getJwtSub(token) {
-    try { return JSON.parse(atob(token.split('.')[1])).sub; } catch { return null; }
-  }
-
   let guestSession = loadGuestSession();
   let conversationHistory = guestSession.history;
+  // Local-answer turns generated for members that haven't been synced to DDB yet.
+  // Sent as localTurns on the next real API call so Lambda can prepend them to DDB history.
+  let pendingMemberTurns = [];
 
   const chatBtn     = document.getElementById('maic-chat-btn');
   const chatWindow  = document.getElementById('maic-chat-window');
@@ -215,11 +214,12 @@
 
   logoutBtn.onclick = () => {
     isAuthenticated = false; memberToken = null; memberUserId = null;
+    pendingMemberTurns = [];
     // Restore guest session from localStorage on logout
     guestSession = loadGuestSession();
     conversationHistory = guestSession.history;
     authBar.classList.remove('member');
-    authStatus.className = 'maic-auth-status';
+    authStatus.className = '';
     authStatus.textContent = '👤 Guest (limited access)';
     loginBtn.style.display = 'inline-block';
     logoutBtn.style.display = 'none';
@@ -250,7 +250,6 @@
       const data = await res.json();
       if (data.AuthenticationResult) {
         memberToken = data.AuthenticationResult.IdToken;
-        memberUserId = getJwtSub(memberToken);
         isAuthenticated = true;
         conversationHistory = []; // member history is server-side; start fresh display
         authBar.classList.add('member');
@@ -382,7 +381,7 @@
     if (!msg || isLoading) return;
 
     // Topic filter — skip if already in an established MAIC conversation
-    if (!isMAICRelated(msg) && conversationHistory.length === 0) {
+    if (!isAuthenticated && !isMAICRelated(msg) && conversationHistory.length === 0) {
       addMessage('user', msg);
       inputEl.value = ''; inputEl.style.height = 'auto';
       addMessage('bot', "I'm only able to answer questions about MAIC (Madison AI Club), its programs, team, events, and AI topics. Feel free to ask me anything along those lines! 😊");
@@ -398,7 +397,14 @@
       addMessage('bot', localAnswer);
       conversationHistory.push({ role: 'user', content: msg });
       conversationHistory.push({ role: 'assistant', content: localAnswer });
-      if (!isAuthenticated) saveGuestSession(conversationHistory);
+      if (!isAuthenticated) {
+        conversationHistory = conversationHistory.slice(-GUEST_CLIENT_CAP);
+        saveGuestSession(conversationHistory);
+      } else {
+        pendingMemberTurns.push({ role: 'user', content: msg });
+        pendingMemberTurns.push({ role: 'assistant', content: localAnswer });
+        pendingMemberTurns = pendingMemberTurns.slice(-GUEST_CLIENT_CAP);
+      }
       return;
     }
 
@@ -408,14 +414,23 @@
     try {
       const res = await fetch(MAIC_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(isAuthenticated && memberToken ? { Authorization: `Bearer ${memberToken}` } : {})
+        },
         body: JSON.stringify({
-          message: msg,                           // plain message — context is in Lambda's system prompt
-          isAuthenticated,
-          userId: memberUserId,                   // Cognito sub (null for guests)
-          history: isAuthenticated ? [] : conversationHistory  // members: backend loads from DDB
+          message: msg,
+          history: isAuthenticated ? [] : conversationHistory,
+          localTurns: isAuthenticated ? pendingMemberTurns : []
         })
       });
+      if (res.status === 401) {
+        removeTyping(typingId);
+        logoutBtn.onclick(); // token expired — reset to guest state
+        addMessage('bot', 'Your session expired. Please sign in again for member access.');
+        isLoading = false; sendBtn.disabled = false;
+        return;
+      }
       const data = await res.json();
       removeTyping(typingId);
       const reply = data.reply || data.error || 'Sorry, something went wrong.';
@@ -425,7 +440,10 @@
       if (!isAuthenticated) {
         conversationHistory.push({ role: 'user', content: msg });
         conversationHistory.push({ role: 'assistant', content: reply });
+        conversationHistory = conversationHistory.slice(-GUEST_CLIENT_CAP);
         saveGuestSession(conversationHistory);
+      } else {
+        pendingMemberTurns = []; // Lambda just persisted them to DDB via localTurns
       }
     } catch(e) {
       removeTyping(typingId);

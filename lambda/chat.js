@@ -1,15 +1,25 @@
 const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, GetCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { CognitoJwtVerifier } = require("aws-jwt-verify");
 
 const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
+// Verifier is module-scoped so JWKS is cached across warm invocations.
+// hydrate() prefetches JWKS during cold-start init to avoid a network round-trip on the first verify call.
+const jwtVerifier = CognitoJwtVerifier.create({
+  userPoolId: process.env.USER_POOL_ID,
+  clientId: process.env.USER_POOL_CLIENT_ID,
+  tokenUse: "id",
+});
+jwtVerifier.hydrate().catch(console.error);
+
 const GUEST_DAILY_LIMIT = 10;
 const GUEST_MAX_TOKENS = 300;
 const MEMBER_MAX_TOKENS = 2000;
-const GUEST_HISTORY_WINDOW = 4;
-const MEMBER_HISTORY_WINDOW = 10;
+const GUEST_TOKEN_BUDGET = 800;    // ~3200 chars of guest history sent to Bedrock
+const MEMBER_TOKEN_BUDGET = 3000;  // ~12000 chars of member history sent to Bedrock
 const SESSION_TTL_DAYS = 7;
 const TABLE_NAME = process.env.USAGE_TABLE;
 const MODEL_ID = "us.anthropic.claude-3-5-haiku-20241022-v1:0";
@@ -62,6 +72,29 @@ MEMBERSHIP: Open to JMU students. Sign in via the Member Portal for full access 
 Only answer questions related to MAIC, its programs, team, AI topics, and JMU. For anything unrelated, politely redirect the user to MAIC topics.
 Be friendly, encouraging, and educational. Keep responses concise and helpful.`;
 
+// ~4 chars/token heuristic — avoids a count_tokens API call
+function estimateTokens(text) {
+  return Math.ceil((text ?? '').length / 4);
+}
+
+function trimToTokenBudget(messages, budget) {
+  let total = 0;
+  const result = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const cost = estimateTokens(messages[i].content);
+    if (total + cost > budget) break;
+    total += cost;
+    result.unshift(messages[i]);
+  }
+  return result;
+}
+
+function sanitizeLocalTurns(turns) {
+  return turns
+    .filter(t => t.role === 'user' || t.role === 'assistant')
+    .map(t => ({ role: t.role, content: String(t.content ?? '').slice(0, 2000) }));
+}
+
 function getTodayKey() {
   return new Date().toISOString().split("T")[0];
 }
@@ -101,10 +134,25 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { message, userId, isAuthenticated, history = [] } = body;
+    const { message, history = [], localTurns = [] } = body;
 
     if (!message || message.trim().length === 0) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: "Message is required" }) };
+    }
+
+    // Verify Cognito JWT from Authorization header — never trust a client-supplied flag
+    const authHeader = event.headers?.Authorization ?? event.headers?.authorization ?? '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    let isAuthenticated = false;
+    let userId = null;
+    if (token) {
+      try {
+        const claims = await jwtVerifier.verify(token);
+        userId = claims.sub;
+        isAuthenticated = true;
+      } catch {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: "Invalid or expired session. Please sign in again." }) };
+      }
     }
 
     // Guest rate limiting and topic filtering
@@ -139,17 +187,17 @@ exports.handler = async (event) => {
     }
 
     const maxTokens = isAuthenticated ? MEMBER_MAX_TOKENS : GUEST_MAX_TOKENS;
-    const historyWindow = isAuthenticated ? MEMBER_HISTORY_WINDOW : GUEST_HISTORY_WINDOW;
+    const tokenBudget = isAuthenticated ? MEMBER_TOKEN_BUDGET : GUEST_TOKEN_BUDGET;
 
-    // Members: load history server-side (DDB) — client history is ignored.
-    // Guests: trust client-sent history (no stable identity to key on).
+    // Members: server-side history (DDB) + unsynced local turns. Guests: trust client-sent history.
     let pastMessages;
     if (isAuthenticated && userId) {
-      pastMessages = await loadMemberHistory(userId);
+      const ddbHistory = await loadMemberHistory(userId);
+      pastMessages = [...ddbHistory, ...sanitizeLocalTurns(localTurns)];
     } else {
       pastMessages = Array.isArray(history) ? history : [];
     }
-    pastMessages = pastMessages.slice(-historyWindow);
+    pastMessages = trimToTokenBudget(pastMessages, tokenBudget);
 
     const messages = [...pastMessages, { role: "user", content: message }];
 
@@ -168,19 +216,19 @@ exports.handler = async (event) => {
     const result = JSON.parse(new TextDecoder().decode(response.body));
     const reply = result.content[0].text;
 
-    // Persist updated history for members, capped at window size
+    // Persist updated history for members, trimmed to token budget
     if (isAuthenticated && userId) {
-      const updatedHistory = [
+      const updatedHistory = trimToTokenBudget([
         ...pastMessages,
         { role: "user", content: message },
         { role: "assistant", content: reply }
-      ].slice(-MEMBER_HISTORY_WINDOW);
+      ], MEMBER_TOKEN_BUDGET);
       await saveMemberHistory(userId, updatedHistory);
     }
 
     return {
       statusCode: 200, headers,
-      body: JSON.stringify({ reply, isAuthenticated: !!isAuthenticated })
+      body: JSON.stringify({ reply, isAuthenticated })
     };
 
   } catch (err) {

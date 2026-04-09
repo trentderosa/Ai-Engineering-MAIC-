@@ -69,7 +69,11 @@ export class MaicChatbotStack extends cdk.Stack {
     chatLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel'],
-      resources: ['arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0","arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0","arn:aws:bedrock:us-east-1:928622535528:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0',
+        'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0',
+        'arn:aws:bedrock:us-east-1:928622535528:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0',
+      ],
     }));
 
     // API Gateway
