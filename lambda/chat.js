@@ -51,6 +51,7 @@ KEY FACTS:
   Emily LaVal (Treasurer), Zachary Johnson (Education Chair), Ayan Jan (Professional Relations), Angeline Jackson (Social Media)
 - Programs: Weekly Technical Workshops, Monthly Guest Speaker Series, Semester Community Projects (all members-only)
 - Meetings: Bi-weekly on Tuesdays at 6:30 PM during the academic semester. Check BeInvolved or announcements for exact upcoming dates.
+- Symposium (major event): April 26 — members showcase their semester work to faculty, students, and employers. This is MAIC's flagship end-of-semester event.
 - Club Teams (project groups members join): AI Engineering, AI Ethics, Robotics, Cybersecurity, Website Development
 - Featured in The Breeze (JMU student newspaper). Attended NVTC 10th Annual Cyber Summit.
 - Past speakers: Joe Holmes (Codecademy), Yi Chen (World/Orb)
