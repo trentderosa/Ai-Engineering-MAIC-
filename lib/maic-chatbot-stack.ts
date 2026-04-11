@@ -66,10 +66,19 @@ export class MaicChatbotStack extends cdk.Stack {
 
     // Grant Lambda permissions
     usageTable.grantReadWriteData(chatLambda);
+    // FIX: the original resources string was a single malformed ARN containing
+    // embedded quotes and commas — it was effectively one invalid ARN and would
+    // have caused every Bedrock invocation to fail with an AccessDeniedException.
+    // Corrected to two properly separated ARN strings:
+    //   1. The base foundation model ARN (required for the model to exist in the account)
+    //   2. The cross-region inference profile ARN (required for on-demand throughput)
     chatLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel'],
-      resources: ['arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0","arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0","arn:aws:bedrock:us-east-1:928622535528:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0'],
+      resources: [
+        'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0',
+        'arn:aws:bedrock:us-east-1:928622535528:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0',
+      ],
     }));
 
     // API Gateway
