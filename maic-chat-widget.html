@@ -341,7 +341,12 @@
     if (q.includes('social media') || q.includes('angeline')) {
       return "Angeline Jackson is the Social Media & Co-Founder. She leads MAIC's digital presence, content strategy, and storytelling.";
     }
-    if (q.includes('board') || q.includes('team') || q.includes('officers') || q.includes('co-founder')) {
+    // "team" / "group" → club project teams, not the executive board
+    if (q.includes('team') || q.includes('group') || q.includes('committee')) {
+      return "MAIC has five active teams members can join:\n• AI Engineering — building and experimenting with AI systems\n• AI Ethics — exploring the societal and ethical dimensions of AI\n• Robotics — hands-on robotics projects and hardware\n• Cybersecurity — AI applications in security and defense\n• Website Development — building and maintaining club tools and sites\n\nInterested in joining a team? Reach out at madisonaiclub@gmail.com!";
+    }
+    // "board" / "officers" / "co-founder" → executive board
+    if (q.includes('board') || q.includes('officers') || q.includes('co-founder') || q.includes('executive')) {
       return "MAIC's Executive Board (all Co-Founders):\n• Mason Scofield — President\n• Alex Hollenbeck — Vice President\n• Jack Nelson — Secretary\n• Emily LaVal — Treasurer\n• Zachary Johnson — Education Chair\n• Ayan Jan — Professional Relations\n• Angeline Jackson — Social Media";
     }
     if (q.includes('contact') || q.includes('email')) {
