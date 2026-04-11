@@ -376,6 +376,9 @@
     if (q.includes('joe holmes') || q.includes('codecademy')) {
       return "Joe Holmes from Codecademy joined MAIC as a guest speaker. He shared insights about his career path, the evolving AI landscape, and how he built AI curriculum at Codecademy.";
     }
+    if (q.includes('meeting') || q.includes('meet') || q.includes('when') || q.includes('schedule') || q.includes('time')) {
+      return "MAIC typically meets bi-weekly on Tuesdays at 6:30 PM during the academic semester. Check announcements or JMU's BeInvolved page for exact upcoming meeting dates.";
+    }
     if (q.includes('location') || q.includes('where') || q.includes('harrisonburg') || q.includes('virginia')) {
       return "MAIC is based at James Madison University in Harrisonburg, Virginia (VA 22807). We are affiliated with JMU Student Life.";
     }
