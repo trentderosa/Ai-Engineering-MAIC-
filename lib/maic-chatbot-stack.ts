@@ -49,16 +49,31 @@ export class MaicChatbotStack extends cdk.Stack {
       generateSecret: false, // Browser client - no secret
     });
 
+    // DynamoDB table for agentic knowledge base (speaker notes, events, topics)
+    const knowledgeTable = new dynamodb.Table(this, 'KnowledgeTable', {
+      tableName: 'maic-knowledge',
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // Preserve knowledge data across deployments
+    });
+
+    knowledgeTable.addGlobalSecondaryIndex({
+      indexName: 'type-index',
+      partitionKey: { name: 'type', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // Lambda function for chat
     const chatLambda = new lambda.Function(this, 'ChatFunction', {
       functionName: 'maic-chat-handler',
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'chat.handler',
       code: lambda.Code.fromAsset('lambda'),
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(60), // Extended for multi-turn tool loops
       memorySize: 512,
       environment: {
         USAGE_TABLE: usageTable.tableName,
+        KNOWLEDGE_TABLE: knowledgeTable.tableName,
         USER_POOL_ID: userPool.userPoolId,
         USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
       },
@@ -66,11 +81,17 @@ export class MaicChatbotStack extends cdk.Stack {
 
     // Grant Lambda permissions
     usageTable.grantReadWriteData(chatLambda);
+    knowledgeTable.grantReadData(chatLambda);
+    // FIX: the original resources string was a single malformed ARN containing
+    // embedded quotes and commas — it was effectively one invalid ARN and would
+    // have caused every Bedrock invocation to fail with an AccessDeniedException.
+    // Corrected to two properly separated ARN strings:
+    //   1. The base foundation model ARN (required for the model to exist in the account)
+    //   2. The cross-region inference profile ARN (required for on-demand throughput)
     chatLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel'],
       resources: [
-        'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0',
         'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0',
         'arn:aws:bedrock:us-east-1:928622535528:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0',
       ],
@@ -105,6 +126,11 @@ export class MaicChatbotStack extends cdk.Stack {
       value: userPoolClient.userPoolClientId,
       description: 'Cognito User Pool Client ID',
       exportName: 'MaicUserPoolClientId',
+    });
+    new cdk.CfnOutput(this, 'KnowledgeTableName', {
+      value: knowledgeTable.tableName,
+      description: 'DynamoDB table for agentic knowledge base',
+      exportName: 'MaicKnowledgeTableName',
     });
   }
 }

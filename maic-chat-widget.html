@@ -37,7 +37,7 @@
       display: flex; align-items: center; justify-content: center; font-size: 18px;
     }
     #maic-chat-header h3 { margin: 0; font-size: 15px; font-weight: 600; color: #CBB677; }
-    #maic-chat-header p { margin: 0; font-size: 11px; opacity: 0.85; color: #CBB677; }
+    #maic-chat-header p  { margin: 0; font-size: 11px; opacity: 0.85; color: #CBB677; }
     #maic-close-btn { background: none; border: none; color: #CBB677; cursor: pointer; font-size: 20px; padding: 0 4px; }
     #maic-auth-bar {
       background: #f8f9fa; border-bottom: 1px solid #eee;
@@ -58,7 +58,8 @@
     #maic-login-form input { border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; }
     #maic-login-form input:focus { border-color: #450084; }
     #maic-login-submit { background: #450084; color: white; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
-    #maic-login-error { color: #450084; font-size: 12px; display: none; }
+    #maic-login-submit:disabled { background: #9e9e9e; cursor: not-allowed; }
+    #maic-login-error { color: #c62828; font-size: 12px; display: none; }
     #maic-messages {
       flex: 1; overflow-y: auto; padding: 12px;
       display: flex; flex-direction: column; gap: 10px; background: #f7f7f8;
@@ -74,6 +75,10 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
     .maic-msg.user .bubble { background: linear-gradient(135deg, #450084, #2d0057); color: white; border-bottom-right-radius: 4px; }
+    /* Error bubbles — visually distinct so the user knows it's an error, not an AI reply */
+    .maic-msg.bot .bubble.error {
+      background: #fff3f3; color: #b71c1c; border: 1px solid #ffcdd2;
+    }
     .maic-msg .avatar-sm {
       width: 28px; height: 28px; border-radius: 50%;
       background: linear-gradient(135deg, #450084, #2d0057); color: #CBB677;
@@ -87,6 +92,13 @@
     .maic-typing .dot:nth-child(2) { animation-delay: 0.2s; }
     .maic-typing .dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+    /* Retry button that appears inside error bubbles */
+    .maic-retry-btn {
+      display: inline-block; margin-top: 8px;
+      background: #450084; color: white; border: none; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 600;
+    }
+    .maic-retry-btn:hover { background: #2d0057; }
     #maic-input-row {
       display: flex; padding: 10px 12px; gap: 8px;
       border-top: 1px solid #eee; background: white;
@@ -134,8 +146,8 @@
   </div>
 
   <div id="maic-login-form">
-    <input type="email" id="maic-email" placeholder="Email address" autocomplete="email">
-    <input type="password" id="maic-password" placeholder="Password" autocomplete="current-password">
+    <input type="email"    id="maic-email"    placeholder="Email address"  autocomplete="email">
+    <input type="password" id="maic-password" placeholder="Password"       autocomplete="current-password">
     <div id="maic-login-error"></div>
     <button id="maic-login-submit">Sign In as Member</button>
   </div>
@@ -143,7 +155,7 @@
   <div id="maic-messages">
     <div class="maic-msg bot">
       <div class="avatar-sm">M</div>
-      <div class="bubble">Hi! 👋 I'm the MAIC Assistant. Ask me anything about the Madison AI Club — our programs, team, events, or how to get involved!</div>
+      <div class="bubble">Hi! I am the MAIC Assistant. Ask me anything about the Madison AI Club — our programs, team, events, or how to get involved!</div>
     </div>
   </div>
 
@@ -158,14 +170,22 @@
 
 <script>
   // ===== CONFIG =====
-  const MAIC_API_URL = 'https://c6epuyktfc.execute-api.us-east-1.amazonaws.com/prod/chat';
-  const MAIC_USER_POOL_ID = 'us-east-1_2eenG9yf1';
-  const MAIC_CLIENT_ID = '6tou1q5kq1pppqnrgk6e4ia33g';
-  const MAIC_REGION = 'us-east-1';
+  const MAIC_API_URL        = 'https://c6epuyktfc.execute-api.us-east-1.amazonaws.com/prod/chat';
+  const MAIC_USER_POOL_ID   = 'us-east-1_2eenG9yf1';
+  const MAIC_CLIENT_ID      = '6tou1q5kq1pppqnrgk6e4ia33g';
+  const MAIC_REGION         = 'us-east-1';
 
+  // How long to wait for the API before showing a timeout error (ms)
+  const REQUEST_TIMEOUT_MS  = 15000;
+  // How many times to automatically retry on server/network errors
+  const MAX_AUTO_RETRIES    = 2;
+
+  // ===== STATE =====
   let isAuthenticated = false;
-  let memberToken = null;
-  let isLoading = false;
+  let memberToken     = null;
+  let isLoading       = false;
+  // Stores the last message sent — used by the retry button
+  let lastMessage     = null;
 
   // Guest history is persisted in localStorage across page refreshes.
   // Member history lives server-side (DDB) — we only track it here for display.
@@ -176,7 +196,7 @@
     try {
       const saved = localStorage.getItem(GUEST_SESSION_KEY);
       if (saved) return JSON.parse(saved);
-    } catch {}
+    } catch (e) {}
     return { history: [] };
   }
 
@@ -190,6 +210,7 @@
   // Sent as localTurns on the next real API call so Lambda can prepend them to DDB history.
   let pendingMemberTurns = [];
 
+  // ===== DOM REFS =====
   const chatBtn     = document.getElementById('maic-chat-btn');
   const chatWindow  = document.getElementById('maic-chat-window');
   const closeBtn    = document.getElementById('maic-close-btn');
@@ -205,23 +226,26 @@
   const loginError  = document.getElementById('maic-login-error');
   const guestNote   = document.getElementById('maic-guest-note');
 
+  // ===== WIDGET OPEN/CLOSE =====
   chatBtn.onclick  = () => chatWindow.classList.toggle('open');
   closeBtn.onclick = () => chatWindow.classList.remove('open');
 
+  // ===== LOGIN / LOGOUT =====
   loginBtn.onclick = () => {
     loginForm.style.display = loginForm.style.display === 'flex' ? 'none' : 'flex';
   };
 
   logoutBtn.onclick = () => {
-    isAuthenticated = false; memberToken = null; memberUserId = null;
+    isAuthenticated    = false;
+    memberToken        = null;
     pendingMemberTurns = [];
     // Restore guest session from localStorage on logout
-    guestSession = loadGuestSession();
+    guestSession        = loadGuestSession();
     conversationHistory = guestSession.history;
     authBar.classList.remove('member');
-    authStatus.className = '';
-    authStatus.textContent = '👤 Guest (limited access)';
-    loginBtn.style.display = 'inline-block';
+    authStatus.className   = '';
+    authStatus.textContent = 'Guest (limited access)';
+    loginBtn.style.display  = 'inline-block';
     logoutBtn.style.display = 'none';
     guestNote.style.display = 'block';
     loginForm.style.display = 'none';
@@ -231,173 +255,191 @@
     const email    = document.getElementById('maic-email').value.trim();
     const password = document.getElementById('maic-password').value;
     loginError.style.display = 'none';
-    if (!email || !password) { showLoginError('Please enter email and password.'); return; }
+
+    if (!email || !password) {
+      showLoginError('Please enter your email and password.');
+      return;
+    }
+
     loginSubmit.textContent = 'Signing in...';
-    loginSubmit.disabled = true;
+    loginSubmit.disabled    = true;
+
     try {
-      const res = await fetch(`https://cognito-idp.${MAIC_REGION}.amazonaws.com/`, {
+      const res = await fetch('https://cognito-idp.' + MAIC_REGION + '.amazonaws.com/', {
         method: 'POST',
         headers: {
           'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
-          'Content-Type': 'application/x-amz-json-1.1'
+          'Content-Type': 'application/x-amz-json-1.1',
         },
         body: JSON.stringify({
-          AuthFlow: 'USER_PASSWORD_AUTH',
-          ClientId: MAIC_CLIENT_ID,
-          AuthParameters: { USERNAME: email, PASSWORD: password }
-        })
+          AuthFlow:       'USER_PASSWORD_AUTH',
+          ClientId:       MAIC_CLIENT_ID,
+          AuthParameters: { USERNAME: email, PASSWORD: password },
+        }),
       });
-      const data = await res.json();
-      if (data.AuthenticationResult) {
-        memberToken = data.AuthenticationResult.IdToken;
-        isAuthenticated = true;
+
+      if (!res.ok) {
+        const errData = await safeParseJSON(res);
+        showLoginError((errData && errData.message) || ('Sign-in failed (' + res.status + '). Please try again.'));
+        return;
+      }
+
+      const data = await safeParseJSON(res);
+      if (data && data.AuthenticationResult && data.AuthenticationResult.IdToken) {
+        memberToken         = data.AuthenticationResult.IdToken;
+        isAuthenticated     = true;
         conversationHistory = []; // member history is server-side; start fresh display
         authBar.classList.add('member');
-        authStatus.className = 'member';
-        authStatus.textContent = '✅ Signed in as member';
-        loginBtn.style.display = 'none';
+        authStatus.className   = 'member';
+        authStatus.textContent = 'Signed in as member';
+        loginBtn.style.display  = 'none';
         logoutBtn.style.display = 'inline-block';
         loginForm.style.display = 'none';
         guestNote.style.display = 'none';
         addMessage('bot', "Welcome! You're signed in as a MAIC member. You now have full access — ask me anything!");
       } else {
-        showLoginError(data.message || 'Login failed. Check your credentials.');
+        showLoginError((data && data.message) || 'Login failed. Check your credentials and try again.');
       }
-    } catch(e) { showLoginError('Connection error. Please try again.'); }
-    loginSubmit.textContent = 'Sign In as Member';
-    loginSubmit.disabled = false;
+    } catch (e) {
+      showLoginError('Could not reach the sign-in service. Check your internet connection.');
+    } finally {
+      loginSubmit.textContent = 'Sign In as Member';
+      loginSubmit.disabled    = false;
+    }
   };
 
   function showLoginError(msg) {
-    loginError.textContent = msg;
+    loginError.textContent   = msg;
     loginError.style.display = 'block';
   }
 
-  inputEl.addEventListener('keydown', e => {
+  // ===== INPUT HANDLERS =====
+  inputEl.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   sendBtn.onclick = sendMessage;
-  inputEl.addEventListener('input', () => {
+  inputEl.addEventListener('input', function() {
     inputEl.style.height = 'auto';
     inputEl.style.height = Math.min(inputEl.scrollHeight, 80) + 'px';
   });
 
-  // ===== MAIC TOPIC FILTER =====
-  const MAIC_KEYWORDS = [
-    'maic', 'madison ai club', 'club', 'member', 'membership', 'join', 'officer',
-    'president', 'vice president', 'treasurer', 'secretary', 'board', 'executive',
-    'jmu', 'james madison', 'university', 'harrisonburg',
-    'mason scofield', 'alex hollenbeck', 'jack nelson', 'emily laval',
-    'zachary johnson', 'ayan jan', 'angeline jackson', 'errett wallace',
-    'event', 'meeting', 'workshop', 'hackathon', 'seminar', 'talk', 'speaker',
-    'schedule', 'calendar', 'upcoming', 'next meeting', 'when', 'where',
-    'codecademy', 'joe holmes', 'nvtc', 'cyber summit', 'breeze', 'newspaper',
-    'ai', 'artificial intelligence', 'machine learning', 'ml', 'deep learning',
-    'neural network', 'nlp', 'natural language', 'computer vision', 'data science',
-    'llm', 'large language model', 'gpt', 'claude', 'chatgpt', 'openai', 'anthropic',
-    'model', 'training', 'dataset', 'algorithm', 'automation', 'robot', 'robotics',
-    'python', 'pytorch', 'tensorflow', 'hugging face', 'transformer', 'embedding',
-    'prompt', 'inference', 'fine-tun', 'reinforcement', 'supervised', 'unsupervised',
-    'classification', 'regression', 'clustering', 'generative', 'diffusion',
-    'bedrock', 'aws', 'amazon', 'cloud', 'api', 'lambda',
-    'what is', 'how does', 'explain', 'tell me about', 'what are', 'help',
-    'how to', 'learn', 'resource', 'project', 'research', 'career', 'internship',
-    'who', 'founder', 'contact', 'email', 'linkedin', 'program', 'mission'
+  // ===== CONTEXT-AWARE TOPIC FILTER =====
+  // Only blocks messages that are unmistakably off-topic.
+  // Ambiguous or broad questions pass through to the AI.
+  const UNRELATED_PATTERNS = [
+    /\b(weather|forecast|temperature|humidity)\b/i,
+    /\b(nfl|nba|nhl|mlb|nascar|soccer score|game score|sports score)\b/i,
+    /\b(recipe|how to cook|bake|ingredient|dinner idea)\b/i,
+    /\b(horoscope|zodiac|astrology)\b/i,
+    /\b(bitcoin price|crypto price|stock price|dogecoin)\b/i,
+    /\b(relationship advice|dating tip)\b/i,
   ];
 
-  function isMAICRelated(msg) {
-    const lower = msg.toLowerCase();
-    return MAIC_KEYWORDS.some(kw => lower.includes(kw));
+  function isObviouslyUnrelated(msg) {
+    return UNRELATED_PATTERNS.some(function(re) { return re.test(msg); });
   }
-  // =============================
 
   // ===== LOCAL KNOWLEDGE BASE (fast answers without API) =====
   function tryLocalAnswer(msg) {
-    const q = msg.toLowerCase();
+    var q = msg.toLowerCase();
 
-    if (q.includes('who') && (q.includes('president') || q.includes('found'))) {
+    if (q.indexOf('who') !== -1 && (q.indexOf('president') !== -1 || q.indexOf('found') !== -1)) {
       return "Mason Scofield is the President & Co-Founder of MAIC. He leads the club's strategy, partnerships, and long-term growth.";
     }
-    if (q.includes('vice president')) {
-      return "Alex Hollenbeck is the Vice President & Co-Founder. She drives operations and supports execution of programs, events, and member development.";
+    if (q.indexOf('vice president') !== -1) {
+      return "Alex Hollenbeck is the Vice President & Co-Founder. She drives operations and supports execution of programs and events.";
     }
-    if (q.includes('treasurer')) {
+    if (q.indexOf('treasurer') !== -1) {
       return "Emily LaVal is the Treasurer & Co-Founder. She manages budgeting, funding, and financial planning for the club.";
     }
-    if (q.includes('secretary')) {
+    if (q.indexOf('secretary') !== -1) {
       return "Jack Nelson is the Secretary & Co-Founder. He keeps club communications, records, and coordination organized.";
     }
-    if (q.includes('education chair') || (q.includes('zachary') || q.includes('zach'))) {
+    if (q.indexOf('education chair') !== -1 || q.indexOf('zachary') !== -1 || q.indexOf('zach') !== -1) {
       return "Zachary Johnson is the Education Chair & Co-Founder. He designs technical learning experiences, workshops, and AI skill-building resources.";
     }
-    if (q.includes('ayan') || q.includes('professional relation')) {
+    if (q.indexOf('ayan') !== -1 || q.indexOf('professional relation') !== -1) {
       return "Ayan Jan is the Professional Relations & Co-Founder. She builds relationships with alumni and professionals to expand career opportunities for members.";
     }
-    if (q.includes('social media') || q.includes('angeline')) {
-      return "Angeline Jackson is the Social Media & Co-Founder. She leads MAIC's digital presence, content strategy, and storytelling across channels.";
+    if (q.indexOf('social media') !== -1 || q.indexOf('angeline') !== -1) {
+      return "Angeline Jackson is the Social Media & Co-Founder. She leads MAIC's digital presence, content strategy, and storytelling.";
     }
-    if (q.includes('board') || q.includes('team') || q.includes('officers') || q.includes('co-founder')) {
-      return "MAIC's Executive Board (all Co-Founders):\n• Mason Scofield — President\n• Alex Hollenbeck — Vice President\n• Jack Nelson — Secretary\n• Emily LaVal — Treasurer\n• Zachary Johnson — Education Chair\n• Ayan Jan — Professional Relations\n• Angeline Jackson — Social Media";
+    if (q.indexOf('team') !== -1 || q.indexOf('group') !== -1 || q.indexOf('committee') !== -1) {
+      return "MAIC has five active teams members can join:\n- AI Engineering — building and experimenting with AI systems\n- AI Ethics — exploring the societal and ethical dimensions of AI\n- Robotics — hands-on robotics projects and hardware\n- Cybersecurity — AI applications in security and defense\n- Website Development — building and maintaining club tools and sites\n\nInterested in joining a team? Reach out at madisonaiclub@gmail.com!";
     }
-    if (q.includes('contact') || q.includes('email')) {
+    if (q.indexOf('board') !== -1 || q.indexOf('officers') !== -1 || q.indexOf('co-founder') !== -1 || q.indexOf('executive') !== -1) {
+      return "MAIC's Executive Board (all Co-Founders):\n- Mason Scofield — President\n- Alex Hollenbeck — Vice President\n- Jack Nelson — Secretary\n- Emily LaVal — Treasurer\n- Zachary Johnson — Education Chair\n- Ayan Jan — Professional Relations\n- Angeline Jackson — Social Media";
+    }
+    if (q.indexOf('contact') !== -1 || q.indexOf('email') !== -1) {
       return "You can reach MAIC at madisonaiclub@gmail.com. You can also find us on LinkedIn or through JMU's BeInvolved page.";
     }
-    if (q.includes('workshop')) {
-      return "MAIC runs weekly Technical Workshops — hands-on sessions led by the Education Chair (Zachary Johnson) covering the latest AI models, tools, frameworks, and research. These are available to members.";
+    if (q.indexOf('symposium') !== -1 || q.indexOf('showcase') !== -1 || q.indexOf('event') !== -1) {
+      return "MAIC has a symposium on April 26 where members present their semester work to faculty, students, and employers — the club's flagship end-of-semester event. MAIC also hosts weekly Technical Workshops and a monthly Guest Speaker Series throughout the semester.";
     }
-    if (q.includes('speaker')) {
-      return "MAIC hosts a monthly Guest Speaker Series with industry professionals. Past speakers include Joe Holmes from Codecademy and Yi Chen from World (Orb). Members only.";
+    if (q.indexOf('workshop') !== -1) {
+      return "MAIC runs weekly Technical Workshops — hands-on sessions led by the Education Chair covering the latest AI models, tools, frameworks, and research. These are available to members.";
     }
-    if (q.includes('project')) {
-      return "MAIC runs semester-long Community Projects where members use AI to tackle real-world challenges and build practical experience. These are members-only.";
+    if (q.indexOf('speaker') !== -1) {
+      return "MAIC hosts a monthly Guest Speaker Series with industry professionals. Past speakers include Joe Holmes (Codecademy) and Yi Chen (World/Orb). Members only.";
     }
-    if (q.includes('join') || q.includes('how to get') || q.includes('membership') || q.includes('sign up')) {
-      return "To join MAIC, you can sign up through JMU's BeInvolved page or reach out at madisonaiclub@gmail.com. As a JMU student, you're eligible to become a member and gain access to workshops, speaker events, and projects!";
+    if (q.indexOf('project') !== -1) {
+      return "MAIC runs semester-long Community Projects where members use AI to tackle real-world challenges and build practical experience. Members only.";
     }
-    if (q.includes('what is maic') || q.includes('about maic') || q.includes('what does maic do')) {
-      return "MAIC (Madison AI Club) is a student organization at James Madison University, established in 2025. We bring together JMU students, industry professionals, and researchers to explore, build, and apply artificial intelligence — from weekly workshops to real-world projects. Our mission: Learn. Inspire. Teach. All Things AI.";
+    if (q.indexOf('join') !== -1 || q.indexOf('how to get') !== -1 || q.indexOf('membership') !== -1 || q.indexOf('sign up') !== -1) {
+      return "To join MAIC, sign up through JMU's BeInvolved page or reach out at madisonaiclub@gmail.com. As a JMU student, you're eligible to become a member and gain access to workshops, speakers, and projects!";
     }
-    if (q.includes('breeze') || q.includes('newspaper') || q.includes('featured') || q.includes('press')) {
-      return "MAIC was featured in The Breeze, JMU's student newspaper, in an article titled \"What is the Madison Artificial Intelligence Club?\" — covering our mission, events, and the vision behind the club's founding.";
+    if (q.indexOf('what is maic') !== -1 || q.indexOf('about maic') !== -1 || q.indexOf('what does maic do') !== -1) {
+      return "MAIC (Madison AI Club) is a student organization at James Madison University, established in 2025. We bring together JMU students, industry professionals, and researchers to explore, build, and apply AI — from weekly workshops to real-world projects. Mission: Learn. Inspire. Teach. All Things AI.";
     }
-    if (q.includes('nvtc') || q.includes('cyber summit') || q.includes('conference')) {
+    if (q.indexOf('breeze') !== -1 || q.indexOf('newspaper') !== -1 || q.indexOf('featured') !== -1 || q.indexOf('press') !== -1) {
+      return 'MAIC was featured in The Breeze, JMU\'s student newspaper, in an article titled "What is the Madison Artificial Intelligence Club?" — covering our mission, events, and the vision behind the club\'s founding.';
+    }
+    if (q.indexOf('nvtc') !== -1 || q.indexOf('cyber summit') !== -1 || q.indexOf('conference') !== -1) {
       return "MAIC board members Ayan Jan, Mason Scofield, Errett Wallace, and John Nelson attended the NVTC 10th Annual Cyber Summit, gaining valuable insights into how AI, defense, and cybersecurity are evolving together.";
     }
-    if (q.includes('joe holmes') || q.includes('codecademy')) {
-      return "Joe Holmes from Codecademy joined MAIC as a guest speaker. He shared insights about his career path, the evolving AI landscape, and how he built AI curriculum at Codecademy — engaging with both new and returning members.";
+    if (q.indexOf('joe holmes') !== -1 || q.indexOf('codecademy') !== -1) {
+      return "Joe Holmes from Codecademy joined MAIC as a guest speaker. He shared insights about his career path, the evolving AI landscape, and how he built AI curriculum at Codecademy.";
     }
-    if (q.includes('location') || q.includes('where') || q.includes('harrisonburg') || q.includes('virginia')) {
+    if (q.indexOf('meeting') !== -1 || q.indexOf('meet') !== -1 || q.indexOf('when') !== -1 || q.indexOf('schedule') !== -1 || q.indexOf('time') !== -1) {
+      return "MAIC typically meets bi-weekly on Tuesdays at 6:30 PM during the academic semester. Check announcements or JMU's BeInvolved page for exact upcoming meeting dates.";
+    }
+    if (q.indexOf('location') !== -1 || q.indexOf('where') !== -1 || q.indexOf('harrisonburg') !== -1 || q.indexOf('virginia') !== -1) {
       return "MAIC is based at James Madison University in Harrisonburg, Virginia (VA 22807). We are affiliated with JMU Student Life.";
     }
-    if (q.includes('program') || q.includes('what do you offer')) {
-      return "MAIC offers three core programs:\n1. 🛠 Technical Workshops — Weekly hands-on AI sessions (members)\n2. 🎤 Guest Speaker Series — Monthly industry professionals (members)\n3. 💡 Community Projects — Semester-long real-world AI projects (members)";
+    if (q.indexOf('program') !== -1 || q.indexOf('what do you offer') !== -1) {
+      return "MAIC offers three core programs:\n1. Technical Workshops — Weekly hands-on AI sessions (members)\n2. Guest Speaker Series — Monthly industry professionals (members)\n3. Community Projects — Semester-long real-world AI projects (members)";
     }
-    return null; // No local answer — send to API
+    return null; // No local answer — call the API
   }
-  // ===========================================================
 
-  async function sendMessage() {
-    const msg = inputEl.value.trim();
+  // ===== SEND MESSAGE =====
+  async function sendMessage(overrideMsg) {
+    var msg = overrideMsg || inputEl.value.trim();
     if (!msg || isLoading) return;
 
-    // Topic filter — skip if already in an established MAIC conversation
-    if (!isAuthenticated && !isMAICRelated(msg) && conversationHistory.length === 0) {
-      addMessage('user', msg);
-      inputEl.value = ''; inputEl.style.height = 'auto';
-      addMessage('bot', "I'm only able to answer questions about MAIC (Madison AI Club), its programs, team, events, and AI topics. Feel free to ask me anything along those lines! 😊");
+    // Filter only clearly unrelated queries; broad/ambiguous questions pass through
+    if (isObviouslyUnrelated(msg)) {
+      if (!overrideMsg) { addMessage('user', msg); inputEl.value = ''; inputEl.style.height = 'auto'; }
+      addMessage('bot', "I'm focused on MAIC and AI topics. Feel free to ask about the club, our programs, events, or anything AI-related!");
       return;
     }
 
-    addMessage('user', msg);
-    inputEl.value = ''; inputEl.style.height = 'auto';
+    if (!overrideMsg) {
+      addMessage('user', msg);
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+    }
 
-    // Try local knowledge base first
-    const localAnswer = tryLocalAnswer(msg);
+    // Cache last message for retry button
+    lastMessage = msg;
+
+    // Try the local knowledge base first (no API call needed)
+    var localAnswer = tryLocalAnswer(msg);
     if (localAnswer) {
       addMessage('bot', localAnswer);
-      conversationHistory.push({ role: 'user', content: msg });
-      conversationHistory.push({ role: 'assistant', content: localAnswer });
       if (!isAuthenticated) {
+        conversationHistory.push({ role: 'user', content: msg });
+        conversationHistory.push({ role: 'assistant', content: localAnswer });
         conversationHistory = conversationHistory.slice(-GUEST_CLIENT_CAP);
         saveGuestSession(conversationHistory);
       } else {
@@ -408,32 +450,16 @@
       return;
     }
 
-    // Fall through to API
-    isLoading = true; sendBtn.disabled = true;
-    const typingId = addTyping();
+    // Call the API
+    setLoading(true);
+    var typingId = addTyping();
+
+    var history    = isAuthenticated ? [] : conversationHistory;
+    var localTurns = isAuthenticated ? pendingMemberTurns : [];
+
     try {
-      const res = await fetch(MAIC_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(isAuthenticated && memberToken ? { Authorization: `Bearer ${memberToken}` } : {})
-        },
-        body: JSON.stringify({
-          message: msg,
-          history: isAuthenticated ? [] : conversationHistory,
-          localTurns: isAuthenticated ? pendingMemberTurns : []
-        })
-      });
-      if (res.status === 401) {
-        removeTyping(typingId);
-        logoutBtn.onclick(); // token expired — reset to guest state
-        addMessage('bot', 'Your session expired. Please sign in again for member access.');
-        isLoading = false; sendBtn.disabled = false;
-        return;
-      }
-      const data = await res.json();
+      var reply = await fetchWithRetry(msg, history, localTurns);
       removeTyping(typingId);
-      const reply = data.reply || data.error || 'Sorry, something went wrong.';
       addMessage('bot', reply);
 
       // Track history client-side for guests only (members are server-side)
@@ -445,39 +471,171 @@
       } else {
         pendingMemberTurns = []; // Lambda just persisted them to DDB via localTurns
       }
-    } catch(e) {
+    } catch (err) {
       removeTyping(typingId);
-      addMessage('bot', 'Connection error. Please try again.');
+      addErrorMessage(err);
+    } finally {
+      setLoading(false);
     }
-    isLoading = false; sendBtn.disabled = false;
   }
 
+  // ===== API CALL WITH TIMEOUT + RETRY =====
+  async function fetchWithRetry(msg, history, localTurns, attempt) {
+    if (history === undefined) history = [];
+    if (localTurns === undefined) localTurns = [];
+    if (attempt === undefined) attempt = 0;
+
+    var controller = new AbortController();
+    var timeoutId  = setTimeout(function() { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+    try {
+      var reqHeaders = { 'Content-Type': 'application/json' };
+      if (isAuthenticated && memberToken) {
+        reqHeaders['Authorization'] = 'Bearer ' + memberToken;
+      }
+
+      var res = await fetch(MAIC_API_URL, {
+        method:  'POST',
+        headers: reqHeaders,
+        body:    JSON.stringify({ message: msg, history: history, localTurns: localTurns }),
+        signal:  controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        var errData = await safeParseJSON(res);
+
+        if (res.status === 401) throw Object.assign(new Error('Your session has expired. Please sign out and sign back in.'), { type: 'AUTH', retryable: false });
+        if (res.status === 403) throw Object.assign(new Error((errData && errData.error) || "I'm focused on MAIC and AI topics. Feel free to ask anything about the club!"), { type: 'TOPIC', retryable: false });
+        if (res.status === 429) throw Object.assign(new Error((errData && errData.error) || "You've reached the message limit. Sign in as a member for unlimited access!"), { type: 'RATE_LIMIT', retryable: false });
+        if (res.status >= 400 && res.status < 500) throw Object.assign(new Error('Request error (' + res.status + '). Please try again.'), { type: 'CLIENT', retryable: false });
+        throw Object.assign(new Error('Server error (' + res.status + '). Retrying...'), { type: 'SERVER', retryable: true });
+      }
+
+      var data = await safeParseJSON(res);
+      if (!data || !data.reply) {
+        throw Object.assign(new Error('The server returned an unexpected response. Please try again.'), { type: 'BAD_RESPONSE', retryable: true });
+      }
+
+      return data.reply;
+
+    } catch (err) {
+      clearTimeout(timeoutId);
+
+      if (err.name === 'AbortError') {
+        throw Object.assign(new Error('The request timed out. Please check your connection and try again.'), { type: 'TIMEOUT', retryable: true });
+      }
+      if (err.name === 'TypeError' && !err.type) {
+        throw Object.assign(new Error('Connection error. Please check your internet connection.'), { type: 'NETWORK', retryable: true });
+      }
+
+      if (err.retryable && attempt < MAX_AUTO_RETRIES) {
+        var delay = (attempt + 1) * 1200;
+        console.warn('[MAIC] Retrying (' + (attempt + 1) + '/' + MAX_AUTO_RETRIES + ') after ' + delay + 'ms');
+        await sleep(delay);
+        return fetchWithRetry(msg, history, localTurns, attempt + 1);
+      }
+
+      throw err;
+    }
+  }
+
+  // ===== HELPERS =====
+
+  function setLoading(state) {
+    isLoading        = state;
+    sendBtn.disabled = state;
+    inputEl.disabled = state;
+  }
+
+  function addErrorMessage(err) {
+    var div = document.createElement('div');
+    div.className = 'maic-msg bot';
+
+    var avatarEl = document.createElement('div');
+    avatarEl.className = 'avatar-sm';
+    avatarEl.textContent = 'M';
+
+    var bubbleEl = document.createElement('div');
+    bubbleEl.className = 'bubble error';
+    bubbleEl.textContent = (err && err.message) ? err.message : 'Something went wrong.';
+
+    if (err.retryable !== false) {
+      var retryBtn = document.createElement('button');
+      retryBtn.className = 'maic-retry-btn';
+      retryBtn.textContent = 'Try again';
+      retryBtn.onclick = function() { retryLastMessage(retryBtn); };
+      bubbleEl.appendChild(document.createElement('br'));
+      bubbleEl.appendChild(retryBtn);
+    }
+
+    div.appendChild(avatarEl);
+    div.appendChild(bubbleEl);
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  window.retryLastMessage = function(btn) {
+    if (!lastMessage || isLoading) return;
+    var msgEl = btn.closest('.maic-msg');
+    if (msgEl) msgEl.remove();
+    sendMessage(lastMessage);
+  };
+
   function addMessage(role, text) {
-    const div = document.createElement('div');
-    div.className = `maic-msg ${role}`;
-    div.innerHTML = role === 'bot'
-      ? `<div class="avatar-sm">M</div><div class="bubble">${escHtml(text)}</div>`
-      : `<div class="bubble">${escHtml(text)}</div>`;
+    var div = document.createElement('div');
+    div.className = 'maic-msg ' + role;
+
+    if (role === 'bot') {
+      var avatarEl = document.createElement('div');
+      avatarEl.className = 'avatar-sm';
+      avatarEl.textContent = 'M';
+      div.appendChild(avatarEl);
+    }
+
+    var bubbleEl = document.createElement('div');
+    bubbleEl.className = 'bubble';
+    bubbleEl.textContent = text;
+    div.appendChild(bubbleEl);
+
     messagesDiv.appendChild(div);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
     return div;
   }
 
   function addTyping() {
-    const id = 'typing-' + Date.now();
-    const div = document.createElement('div');
-    div.className = 'maic-msg bot'; div.id = id;
-    div.innerHTML = `<div class="avatar-sm">M</div><div class="bubble maic-typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`;
+    var id  = 'typing-' + Date.now();
+    var div = document.createElement('div');
+    div.className = 'maic-msg bot';
+    div.id        = id;
+
+    var avatarEl = document.createElement('div');
+    avatarEl.className = 'avatar-sm';
+    avatarEl.textContent = 'M';
+
+    var bubbleEl = document.createElement('div');
+    bubbleEl.className = 'bubble maic-typing';
+    bubbleEl.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+
+    div.appendChild(avatarEl);
+    div.appendChild(bubbleEl);
     messagesDiv.appendChild(div);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
     return id;
   }
 
-  function removeTyping(id) { const el = document.getElementById(id); if (el) el.remove(); }
-
-  function escHtml(t) {
-    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  function removeTyping(id) {
+    var el = document.getElementById(id);
+    if (el) el.remove();
   }
+
+  async function safeParseJSON(res) {
+    try { return await res.json(); }
+    catch (e) { return null; }
+  }
+
+  function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 </script>
 </body>
 </html>
