@@ -9,6 +9,7 @@
  *  - Rate-limit guests via DynamoDB
  *  - Block only clearly unrelated guest queries (context-aware, not keyword-based)
  *  - Invoke Claude via Bedrock with tool use for agentic knowledge retrieval
+ *  - Maintain server-side conversation history for members, accept client history for guests
  *  - Return structured, typed error responses
  */
 
@@ -29,6 +30,9 @@ const MEMBER_MAX_TOKENS   = 2000;
 const MAX_MESSAGE_LENGTH  = 2000;
 const BEDROCK_MAX_RETRIES = 2;
 const MAX_TOOL_ROUNDS     = 5;    // Max agentic loop iterations before giving up
+const GUEST_TOKEN_BUDGET  = 800;  // ~3200 chars of guest history sent to Bedrock
+const MEMBER_TOKEN_BUDGET = 3000; // ~12000 chars of member history sent to Bedrock
+const SESSION_TTL_DAYS    = 7;
 
 const TABLE_NAME          = process.env.USAGE_TABLE;
 const KNOWLEDGE_TABLE     = process.env.KNOWLEDGE_TABLE;
@@ -104,6 +108,31 @@ const TOOLS = [
     },
   },
 ];
+
+// ── Conversation History Helpers ───────────────────────────────────────────
+
+// ~4 chars/token heuristic — avoids a count_tokens API call
+function estimateTokens(text) {
+  return Math.ceil((text ?? '').length / 4);
+}
+
+function trimToTokenBudget(messages, budget) {
+  let total = 0;
+  const result = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const cost = estimateTokens(messages[i].content);
+    if (total + cost > budget) break;
+    total += cost;
+    result.unshift(messages[i]);
+  }
+  return result;
+}
+
+function sanitizeLocalTurns(turns) {
+  return turns
+    .filter(t => t.role === 'user' || t.role === 'assistant')
+    .map(t => ({ role: t.role, content: String(t.content ?? '').slice(0, 2000) }));
+}
 
 // ── JWKS Verification (pure Node built-ins, no external deps) ──────────────
 let jwksCache     = null;
@@ -339,10 +368,10 @@ async function invokeBedrockRaw(messages, maxTokens, attempt = 0) {
 /**
  * Runs a multi-turn conversation with Claude, executing tool calls as they
  * come in, until Claude produces a final text response or the round limit
- * is reached.
+ * is reached. Accepts optional pastMessages for conversation memory.
  */
-async function invokeWithTools(userMessage, maxTokens) {
-  const messages = [{ role: "user", content: userMessage }];
+async function invokeWithTools(userMessage, maxTokens, pastMessages = []) {
+  const messages = [...pastMessages, { role: "user", content: userMessage }];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const result = await invokeBedrockRaw(messages, maxTokens);
@@ -399,6 +428,22 @@ function respond(statusCode, headers, body) {
   return { statusCode, headers, body: JSON.stringify(body) };
 }
 
+async function loadMemberHistory(userId) {
+  const result = await ddb.send(new GetCommand({
+    TableName: TABLE_NAME,
+    Key: { pk: `session#${userId}` },
+  }));
+  return result.Item?.history || [];
+}
+
+async function saveMemberHistory(userId, history) {
+  const ttl = Math.floor(Date.now() / 1000) + SESSION_TTL_DAYS * 86400;
+  await ddb.send(new PutCommand({
+    TableName: TABLE_NAME,
+    Item: { pk: `session#${userId}`, history, ttl },
+  }));
+}
+
 // ── Main Handler ───────────────────────────────────────────────────────────
 exports.handler = async (event) => {
   const headers = {
@@ -420,7 +465,7 @@ exports.handler = async (event) => {
     return respond(400, headers, { error: "Invalid JSON in request body.", code: "BAD_REQUEST" });
   }
 
-  const { message } = body;
+  const { message, history = [], localTurns = [] } = body;
 
   if (!message || typeof message !== "string" || message.trim().length === 0) {
     return respond(400, headers, { error: "A non-empty message is required.", code: "BAD_REQUEST" });
@@ -435,17 +480,18 @@ exports.handler = async (event) => {
 
   // ── 2. Verify auth via Authorization header ───────────────────────────────
   let isAuthenticated = false;
+  let userId = null;
   const authHeader = event.headers?.Authorization || event.headers?.authorization || "";
   const token      = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
 
   if (token) {
     try {
-      await verifyToken(token);
+      const payload = await verifyToken(token);
+      userId = payload.sub;
       isAuthenticated = true;
       console.info("[MAIC] Authenticated member request");
     } catch (err) {
       console.warn(`[MAIC] Token invalid (${err.code}): ${err.message} — downgrading to guest`);
-      isAuthenticated = false;
     }
   }
 
@@ -493,12 +539,34 @@ exports.handler = async (event) => {
     }
   }
 
-  // ── 4. Invoke Bedrock with agentic tool loop ──────────────────────────────
-  const maxTokens = isAuthenticated ? MEMBER_MAX_TOKENS : GUEST_MAX_TOKENS;
+  // ── 4. Build conversation history ─────────────────────────────────────────
+  const maxTokens   = isAuthenticated ? MEMBER_MAX_TOKENS : GUEST_MAX_TOKENS;
+  const tokenBudget = isAuthenticated ? MEMBER_TOKEN_BUDGET : GUEST_TOKEN_BUDGET;
+
+  let pastMessages = [];
+  if (isAuthenticated && userId) {
+    const ddbHistory = await loadMemberHistory(userId);
+    pastMessages = [...ddbHistory, ...sanitizeLocalTurns(localTurns)];
+  } else {
+    pastMessages = sanitizeLocalTurns(Array.isArray(history) ? history : []);
+  }
+  pastMessages = trimToTokenBudget(pastMessages, tokenBudget);
+
+  // ── 5. Invoke Bedrock with agentic tool loop ──────────────────────────────
   console.info(`[MAIC] Invoking Bedrock — authenticated=${isAuthenticated}, maxTokens=${maxTokens}`);
 
   try {
-    const reply = await invokeWithTools(message, maxTokens);
+    const reply = await invokeWithTools(message, maxTokens, pastMessages);
+
+    if (isAuthenticated && userId) {
+      const updatedHistory = trimToTokenBudget([
+        ...pastMessages,
+        { role: "user", content: message },
+        { role: "assistant", content: reply },
+      ], MEMBER_TOKEN_BUDGET);
+      await saveMemberHistory(userId, updatedHistory);
+    }
+
     return respond(200, headers, { reply, authenticated: isAuthenticated });
 
   } catch (err) {
