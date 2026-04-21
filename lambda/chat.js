@@ -8,7 +8,7 @@
  *  - Verify Cognito JWT from Authorization header (never trust the client body)
  *  - Rate-limit guests via DynamoDB
  *  - Block only clearly unrelated guest queries (context-aware, not keyword-based)
- *  - Invoke Claude via Bedrock with retry logic
+ *  - Invoke Claude via Bedrock with tool use for agentic knowledge retrieval
  *  - Return structured, typed error responses
  */
 
@@ -16,29 +16,30 @@ const https   = require("https");
 const crypto  = require("crypto");
 const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 const { DynamoDBClient }                           = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, GetCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand } = require("@aws-sdk/lib-dynamodb");
 
 // ── Clients ────────────────────────────────────────────────────────────────
 const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION || "us-east-1" });
 const ddb     = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const GUEST_DAILY_LIMIT  = 10;
-const GUEST_MAX_TOKENS   = 300;
-const MEMBER_MAX_TOKENS  = 2000;
-const MAX_MESSAGE_LENGTH = 2000;
+const GUEST_DAILY_LIMIT   = 10;
+const GUEST_MAX_TOKENS    = 500;  // Extra headroom for tool-use overhead
+const MEMBER_MAX_TOKENS   = 2000;
+const MAX_MESSAGE_LENGTH  = 2000;
 const BEDROCK_MAX_RETRIES = 2;
+const MAX_TOOL_ROUNDS     = 5;    // Max agentic loop iterations before giving up
 
-const TABLE_NAME         = process.env.USAGE_TABLE;
-const USER_POOL_ID       = process.env.USER_POOL_ID;
+const TABLE_NAME          = process.env.USAGE_TABLE;
+const KNOWLEDGE_TABLE     = process.env.KNOWLEDGE_TABLE;
+const USER_POOL_ID        = process.env.USER_POOL_ID;
 const USER_POOL_CLIENT_ID = process.env.USER_POOL_CLIENT_ID;
-const REGION             = process.env.AWS_REGION || "us-east-1";
+const REGION              = process.env.AWS_REGION || "us-east-1";
 
 // Model: cross-region inference profile (required for on-demand throughput)
 const MODEL_ID = "us.anthropic.claude-3-5-haiku-20241022-v1:0";
 
 // ── System Prompt ──────────────────────────────────────────────────────────
-// FIX: was "University of Wisconsin-Madison" — corrected to James Madison University
 const SYSTEM_PROMPT = `You are the official assistant for MAIC (Madison AI Club) at James Madison University (JMU) in Harrisonburg, Virginia (VA 22807).
 
 You help JMU students with questions about MAIC's programs, events, executive board, membership, and AI topics.
@@ -59,11 +60,52 @@ KEY FACTS:
 When asked about "teams" or "groups", list the five club teams above — NOT the executive board.
 When asked about the "board", "officers", or "executive board", list the Co-Founders above.
 
+You have access to a knowledge base tool. Use it proactively when someone asks for:
+- Detailed speaker notes or presentation content
+- Specific event details not listed above
+- Any topic where you need more information than what's in your system prompt
+
 If a question is CLEARLY unrelated to MAIC, JMU, or artificial intelligence (e.g., sports scores, weather, cooking recipes),
 politely say: "I'm focused on MAIC and AI topics — feel free to ask about the club, our programs, or anything AI!"`;
 
+// ── Tool Definitions ───────────────────────────────────────────────────────
+const TOOLS = [
+  {
+    name: "search_knowledge",
+    description: "Search the MAIC knowledge base for detailed information about speakers, events, notes, or topics. Use this when you need specific details not covered by your system prompt — e.g., speaker presentation notes, event schedules, topic deep-dives.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search terms to find relevant entries (e.g., 'Joe Holmes Codecademy talk', 'April symposium agenda', 'machine learning workshop')",
+        },
+        type: {
+          type: "string",
+          enum: ["speaker", "event", "note", "topic"],
+          description: "Optional: narrow results to a specific category",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_knowledge_item",
+    description: "Retrieve complete details for a specific knowledge entry by its unique ID. Use this after search_knowledge returns a result with a 'pk' field to get the full content.",
+    input_schema: {
+      type: "object",
+      properties: {
+        pk: {
+          type: "string",
+          description: "The unique key of the entry returned from search_knowledge (e.g., 'speaker#joe-holmes', 'event#april-symposium-2025')",
+        },
+      },
+      required: ["pk"],
+    },
+  },
+];
+
 // ── JWKS Verification (pure Node built-ins, no external deps) ──────────────
-// Caches the public key set for 1 hour to avoid fetching on every request.
 let jwksCache     = null;
 let jwksCacheTime = 0;
 
@@ -113,23 +155,19 @@ async function verifyToken(token) {
     throw Object.assign(new Error("Cannot decode token"), { code: "BAD_TOKEN" });
   }
 
-  // Expiration
   if (payload.exp < Math.floor(Date.now() / 1000)) {
     throw Object.assign(new Error("Token expired"), { code: "EXPIRED" });
   }
 
-  // Issuer — must match OUR Cognito pool (prevents tokens from other pools)
   const expectedIss = `https://cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID}`;
   if (payload.iss !== expectedIss) {
     throw Object.assign(new Error("Invalid issuer"), { code: "BAD_TOKEN" });
   }
 
-  // Audience — must match OUR app client ID
   if (payload.aud !== USER_POOL_CLIENT_ID) {
     throw Object.assign(new Error("Invalid audience"), { code: "BAD_TOKEN" });
   }
 
-  // Signature — fetch JWKS and verify RS256 signature using Node crypto
   const jwks = await fetchJwks();
   const key  = jwks.keys.find((k) => k.kid === header.kid);
   if (!key) throw Object.assign(new Error("Signing key not found"), { code: "BAD_TOKEN" });
@@ -144,10 +182,6 @@ async function verifyToken(token) {
 }
 
 // ── Context-Aware Topic Filter ─────────────────────────────────────────────
-// FIX: replaced exhaustive keyword allow-list with a small BLOCK-list.
-// Default = ALLOW. Only block messages that are unmistakably off-topic.
-// Ambiguous questions ("what's happening this week?", "who runs this?") pass through
-// and are handled naturally by the AI's system prompt.
 const UNRELATED_PATTERNS = [
   /\b(weather|forecast|temperature|humidity)\b/i,
   /\b(nfl|nba|nhl|mlb|nascar|nfl score|nba score|soccer score|game score)\b/i,
@@ -161,10 +195,99 @@ function isGuestTopicBlocked(message) {
   return UNRELATED_PATTERNS.some((re) => re.test(message));
 }
 
-// ── Bedrock Invocation with Retry ──────────────────────────────────────────
-// Retries on throttling or service errors (up to BEDROCK_MAX_RETRIES times).
-// Uses exponential backoff: 1s, 2s.
-async function invokeBedrockWithRetry(message, maxTokens, attempt = 0) {
+// ── Knowledge Base Tool Implementations ───────────────────────────────────
+
+/**
+ * Scans the knowledge table and scores results by keyword relevance.
+ * Optionally filters by `type` via the GSI to reduce scan volume.
+ */
+async function searchKnowledge(query, type) {
+  if (!KNOWLEDGE_TABLE) return { error: "Knowledge base not configured", results: [] };
+
+  const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+  if (queryTerms.length === 0) return { results: [], count: 0 };
+
+  try {
+    let items;
+
+    if (type) {
+      const result = await ddb.send(new QueryCommand({
+        TableName: KNOWLEDGE_TABLE,
+        IndexName: "type-index",
+        KeyConditionExpression: "#t = :type",
+        ExpressionAttributeNames: { "#t": "type" },
+        ExpressionAttributeValues: { ":type": type },
+      }));
+      items = result.Items || [];
+    } else {
+      const result = await ddb.send(new ScanCommand({ TableName: KNOWLEDGE_TABLE }));
+      items = result.Items || [];
+    }
+
+    const scored = items
+      .map((item) => {
+        const searchText = [
+          item.title || "",
+          item.summary || "",
+          (item.tags || []).join(" "),
+          item.type || "",
+        ].join(" ").toLowerCase();
+
+        const score = queryTerms.filter((term) => searchText.includes(term)).length;
+        return { item, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map(({ item }) => ({
+        pk: item.pk,
+        type: item.type,
+        title: item.title,
+        summary: item.summary || (item.content || "").slice(0, 300),
+        tags: item.tags,
+      }));
+
+    return { results: scored, count: scored.length };
+  } catch (err) {
+    console.error("[MAIC] Knowledge search error:", err.message);
+    return { error: "Search failed", results: [] };
+  }
+}
+
+/**
+ * Fetches a single knowledge entry by primary key.
+ */
+async function getKnowledgeItem(pk) {
+  if (!KNOWLEDGE_TABLE) return { error: "Knowledge base not configured" };
+
+  try {
+    const result = await ddb.send(new GetCommand({
+      TableName: KNOWLEDGE_TABLE,
+      Key: { pk },
+    }));
+
+    if (!result.Item) return { error: `No entry found for key: ${pk}` };
+    return result.Item;
+  } catch (err) {
+    console.error("[MAIC] Knowledge get error:", err.message);
+    return { error: "Retrieval failed" };
+  }
+}
+
+async function executeToolCall(toolName, toolInput) {
+  console.info(`[MAIC] Tool call: ${toolName}`, JSON.stringify(toolInput));
+  switch (toolName) {
+    case "search_knowledge":
+      return searchKnowledge(toolInput.query, toolInput.type);
+    case "get_knowledge_item":
+      return getKnowledgeItem(toolInput.pk);
+    default:
+      return { error: `Unknown tool: ${toolName}` };
+  }
+}
+
+// ── Bedrock Invocation (single raw call with retry) ────────────────────────
+async function invokeBedrockRaw(messages, maxTokens, attempt = 0) {
   try {
     const response = await bedrock.send(
       new InvokeModelCommand({
@@ -175,12 +298,12 @@ async function invokeBedrockWithRetry(message, maxTokens, attempt = 0) {
           anthropic_version: "bedrock-2023-05-31",
           max_tokens: maxTokens,
           system:     SYSTEM_PROMPT,
-          messages:   [{ role: "user", content: message }],
+          tools:      TOOLS,
+          messages,
         }),
       })
     );
 
-    // FIX: validate response shape before accessing .content[0].text
     let result;
     try {
       result = JSON.parse(new TextDecoder().decode(response.body));
@@ -188,14 +311,9 @@ async function invokeBedrockWithRetry(message, maxTokens, attempt = 0) {
       throw Object.assign(new Error("Bedrock returned non-JSON body"), { code: "BAD_RESPONSE" });
     }
 
-    if (!result?.content?.[0]?.text) {
-      throw Object.assign(new Error("Unexpected Bedrock response shape"), { code: "BAD_RESPONSE" });
-    }
-
-    return result.content[0].text;
+    return result;
 
   } catch (err) {
-    // Don't retry logic/validation errors
     if (err.code === "BAD_RESPONSE") throw err;
 
     const isRetryable =
@@ -210,11 +328,66 @@ async function invokeBedrockWithRetry(message, maxTokens, attempt = 0) {
       const delay = (attempt + 1) * 1000;
       console.warn(`[MAIC] Bedrock retry ${attempt + 1}/${BEDROCK_MAX_RETRIES} after ${delay}ms — ${err.name || err.message}`);
       await new Promise((r) => setTimeout(r, delay));
-      return invokeBedrockWithRetry(message, maxTokens, attempt + 1);
+      return invokeBedrockRaw(messages, maxTokens, attempt + 1);
     }
 
     throw err;
   }
+}
+
+// ── Agentic Tool Loop ──────────────────────────────────────────────────────
+/**
+ * Runs a multi-turn conversation with Claude, executing tool calls as they
+ * come in, until Claude produces a final text response or the round limit
+ * is reached.
+ */
+async function invokeWithTools(userMessage, maxTokens) {
+  const messages = [{ role: "user", content: userMessage }];
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const result = await invokeBedrockRaw(messages, maxTokens);
+
+    const { stop_reason, content } = result;
+
+    if (!content || !Array.isArray(content)) {
+      throw Object.assign(new Error("Unexpected Bedrock response shape"), { code: "BAD_RESPONSE" });
+    }
+
+    if (stop_reason === "end_turn" || stop_reason === "max_tokens") {
+      const textBlock = content.find((b) => b.type === "text");
+      if (!textBlock?.text) {
+        throw Object.assign(new Error("No text block in Bedrock response"), { code: "BAD_RESPONSE" });
+      }
+      return textBlock.text;
+    }
+
+    if (stop_reason === "tool_use") {
+      // Append Claude's response (including tool_use blocks) to the conversation
+      messages.push({ role: "assistant", content });
+
+      // Execute all tool calls in parallel and collect results
+      const toolUseBlocks = content.filter((b) => b.type === "tool_use");
+      const toolResults = await Promise.all(
+        toolUseBlocks.map(async (block) => {
+          const toolResult = await executeToolCall(block.name, block.input);
+          return {
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: JSON.stringify(toolResult),
+          };
+        })
+      );
+
+      messages.push({ role: "user", content: toolResults });
+      continue;
+    }
+
+    // Unexpected stop_reason — return whatever text we have
+    const textBlock = content.find((b) => b.type === "text");
+    return textBlock?.text || "";
+  }
+
+  throw Object.assign(new Error("Tool loop exceeded maximum rounds"), { code: "TOOL_LOOP_LIMIT" });
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────
@@ -235,12 +408,11 @@ exports.handler = async (event) => {
     "Access-Control-Allow-Methods":"POST,OPTIONS",
   };
 
-  // Preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers, body: "" };
   }
 
-  // ── 1. Parse request body safely ──────────────────────────────────────────
+  // ── 1. Parse request body ─────────────────────────────────────────────────
   let body;
   try {
     body = JSON.parse(event.body || "{}");
@@ -261,10 +433,7 @@ exports.handler = async (event) => {
     });
   }
 
-  // ── 2. Verify auth via Authorization header (NEVER trust the request body) ─
-  // FIX: the old code read isAuthenticated from body — that's client-controlled
-  // and completely insecure. We now read the Bearer token from the header and
-  // cryptographically verify it against our Cognito user pool.
+  // ── 2. Verify auth via Authorization header ───────────────────────────────
   let isAuthenticated = false;
   const authHeader = event.headers?.Authorization || event.headers?.authorization || "";
   const token      = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
@@ -275,17 +444,14 @@ exports.handler = async (event) => {
       isAuthenticated = true;
       console.info("[MAIC] Authenticated member request");
     } catch (err) {
-      // Log but don't hard-fail — downgrade to guest access.
-      // If you want strict enforcement (reject invalid tokens entirely), return 401 here.
       console.warn(`[MAIC] Token invalid (${err.code}): ${err.message} — downgrading to guest`);
       isAuthenticated = false;
     }
   }
 
-  // ── 3. Guest-only checks ───────────────────────────────────────────────────
+  // ── 3. Guest-only checks ──────────────────────────────────────────────────
   if (!isAuthenticated) {
 
-    // Context-aware topic filter — only block clearly unrelated queries
     if (isGuestTopicBlocked(message)) {
       console.info("[MAIC] Guest topic blocked");
       return respond(403, headers, {
@@ -294,7 +460,6 @@ exports.handler = async (event) => {
       });
     }
 
-    // Rate limit by IP + day
     const ip       = event.requestContext?.identity?.sourceIp || "unknown";
     const usageKey = `guest#${ip}#${getTodayKey()}`;
     let count = 0;
@@ -303,7 +468,6 @@ exports.handler = async (event) => {
       const usage = await ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: { pk: usageKey } }));
       count = usage.Item?.count || 0;
     } catch (err) {
-      // DynamoDB read failure — log and continue rather than blocking the user
       console.error("[MAIC] DynamoDB read error:", err.message);
     }
 
@@ -315,14 +479,13 @@ exports.handler = async (event) => {
       });
     }
 
-    // Increment counter (non-fatal if this fails)
     try {
       await ddb.send(new PutCommand({
         TableName: TABLE_NAME,
         Item: {
-          pk:  usageKey,
+          pk:    usageKey,
           count: count + 1,
-          ttl: Math.floor(Date.now() / 1000) + 86400, // auto-expire after 24h
+          ttl:   Math.floor(Date.now() / 1000) + 86400,
         },
       }));
     } catch (err) {
@@ -330,21 +493,18 @@ exports.handler = async (event) => {
     }
   }
 
-  // ── 4. Invoke Bedrock ──────────────────────────────────────────────────────
+  // ── 4. Invoke Bedrock with agentic tool loop ──────────────────────────────
   const maxTokens = isAuthenticated ? MEMBER_MAX_TOKENS : GUEST_MAX_TOKENS;
   console.info(`[MAIC] Invoking Bedrock — authenticated=${isAuthenticated}, maxTokens=${maxTokens}`);
 
   try {
-    const reply = await invokeBedrockWithRetry(message, maxTokens);
+    const reply = await invokeWithTools(message, maxTokens);
     return respond(200, headers, { reply, authenticated: isAuthenticated });
 
   } catch (err) {
     console.error("[MAIC] Bedrock error:", { name: err.name, message: err.message, code: err.code });
 
-    if (
-      err.name === "ThrottlingException" ||
-      err.$metadata?.httpStatusCode === 429
-    ) {
+    if (err.name === "ThrottlingException" || err.$metadata?.httpStatusCode === 429) {
       return respond(429, headers, {
         error: "The AI service is temporarily busy. Please wait a moment and try again.",
         code: "AI_BUSY",
@@ -355,6 +515,13 @@ exports.handler = async (event) => {
       return respond(502, headers, {
         error: "The AI returned an unexpected response. Please try again.",
         code: "BAD_RESPONSE",
+      });
+    }
+
+    if (err.code === "TOOL_LOOP_LIMIT") {
+      return respond(500, headers, {
+        error: "The AI took too many steps to answer. Please try a more specific question.",
+        code: "TOOL_LOOP_LIMIT",
       });
     }
 
